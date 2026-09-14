@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: plantshop-postgres
+
+    environment:
+      POSTGRES_USER: plantshop
+      POSTGRES_PASSWORD: plantshop
+      POSTGRES_DB: plantshop
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
