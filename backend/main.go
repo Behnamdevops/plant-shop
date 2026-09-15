@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,6 +31,9 @@ func main() {
 	productRepository := product.NewRepository(db)
 	productHandler := product.NewHandler(productRepository)
 
+	authRepository := auth.NewRepository(db)
+	authHandler := auth.NewHandler(authRepository)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +44,11 @@ func main() {
 			"database": "connected",
 		})
 	})
+
+	mux.HandleFunc("POST /api/v1/auth/register", authHandler.Register)
+	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
+	mux.HandleFunc("GET /api/v1/me", authHandler.Me)
 
 	mux.HandleFunc("GET /api/v1/products", productHandler.List)
 	mux.HandleFunc("GET /api/v1/products/{slug}", productHandler.GetBySlug)
