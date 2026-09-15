@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -111,6 +112,37 @@ func (r *Repository) Create(ctx context.Context, input CreateProductInput) (Prod
 		&p.UpdatedAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Product{}, ErrDuplicateSlug
+		}
+		return Product{}, err
+	}
+	return p, nil
+}
+
+func (r *Repository) Update(ctx context.Context, id int64, input UpdateProductInput) (Product, error) {
+	var p Product
+	err := r.db.QueryRow(ctx, `
+		UPDATE products
+		SET name = $1, slug = $2, description = $3, price = $4, stock = $5, image_url = $6, updated_at = NOW()
+		WHERE id = $7
+		RETURNING id, name, slug, description, price, stock, image_url, created_at, updated_at
+	`, *input.Name, *input.Slug, *input.Description, *input.Price, *input.Stock, input.ImageURL, id).Scan(
+		&p.ID,
+		&p.Name,
+		&p.Slug,
+		&p.Description,
+		&p.Price,
+		&p.Stock,
+		&p.ImageURL,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Product{}, err
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return Product{}, ErrDuplicateSlug

@@ -44,6 +44,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/products", productHandler.List)
 	mux.HandleFunc("GET /api/v1/products/{slug}", productHandler.GetBySlug)
 	mux.HandleFunc("POST /api/v1/admin/products", productHandler.Create)
+	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
 
 	log.Println("server running on :8080")
 
