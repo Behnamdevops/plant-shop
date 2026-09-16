@@ -66,6 +66,8 @@ export default function AdminOrdersPage() {
                 <th>Order</th>
                 <th>Customer</th>
                 <th>Status</th>
+                <th>Payment</th>
+                <th>Shipping</th>
                 <th>Total</th>
                 <th>Placed</th>
                 <th></th>
@@ -83,6 +85,8 @@ export default function AdminOrdersPage() {
                   <td>
                     <span className="status-badge">{order.status}</span>
                   </td>
+                  <td>{order.payment_status}</td>
+                  <td>{order.shipping_method}</td>
                   <td className="price">{order.total}</td>
                   <td>{new Date(order.created_at).toLocaleString()}</td>
                   <td>

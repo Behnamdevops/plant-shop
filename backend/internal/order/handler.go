@@ -44,7 +44,38 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// Create builds an order from the authenticated user's current cart.
+// checkoutInput is the wire shape of the checkout request body. It mirrors
+// CheckoutInput field-for-field; the user id always comes from the
+// authenticated session, never from this body.
+type checkoutInput struct {
+	RecipientName  string `json:"recipient_name"`
+	Phone          string `json:"phone"`
+	AddressLine1   string `json:"address_line1"`
+	AddressLine2   string `json:"address_line2"`
+	City           string `json:"city"`
+	PostalCode     string `json:"postal_code"`
+	Country        string `json:"country"`
+	ShippingMethod string `json:"shipping_method"`
+}
+
+func (in checkoutInput) toModel() CheckoutInput {
+	return CheckoutInput{
+		RecipientName:  in.RecipientName,
+		Phone:          in.Phone,
+		AddressLine1:   in.AddressLine1,
+		AddressLine2:   in.AddressLine2,
+		City:           in.City,
+		PostalCode:     in.PostalCode,
+		Country:        in.Country,
+		ShippingMethod: in.ShippingMethod,
+	}
+}
+
+// Create builds an order from the authenticated user's current cart plus
+// the delivery/shipping details supplied in the request body. The
+// authenticated user id always comes from the session; nothing about the
+// user's identity, prices, fees, or totals is ever trusted from the
+// request body.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.auth.Authenticate(r)
 	if err != nil {
@@ -52,8 +83,26 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	o, err := h.repository.CreateFromCart(r.Context(), userID)
+	var body checkoutInput
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	input := body.toModel().Trimmed()
+	if err := input.Validate(); err != nil {
+		var verr *ErrValidation
+		if errors.As(err, &verr) {
+			http.Error(w, verr.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	o, err := h.repository.CreateFromCart(r.Context(), userID, input)
 	if err != nil {
+		var verr *ErrValidation
 		switch {
 		case errors.Is(err, ErrEmptyCart):
 			http.Error(w, "cart is empty", http.StatusBadRequest)
@@ -61,6 +110,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "insufficient stock", http.StatusConflict)
 		case errors.Is(err, ErrProductNotFound):
 			http.Error(w, "product not found", http.StatusNotFound)
+		case errors.As(err, &verr):
+			http.Error(w, verr.Error(), http.StatusBadRequest)
 		default:
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}

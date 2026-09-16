@@ -1,10 +1,18 @@
+import type { CheckoutInput } from '../types/checkout'
 import type { AdminOrderDetails, AdminOrderSummary, OrderDetails, OrderSummary } from '../types/order'
 import { throwApiError } from './errors'
 
-export async function createOrder(): Promise<OrderSummary> {
+// createOrder submits a checkout request for the authenticated user's
+// current cart. input carries only user-provided delivery/shipping
+// details — the server always recalculates the item subtotal, shipping
+// fee, and total itself, and the user id always comes from the session
+// cookie, never from this body.
+export async function createOrder(input: CheckoutInput): Promise<OrderSummary> {
   const response = await fetch('/api/v1/orders', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
+    body: JSON.stringify(input),
   })
 
   if (!response.ok) {

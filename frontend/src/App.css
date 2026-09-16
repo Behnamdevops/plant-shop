@@ -579,6 +579,74 @@ tbody tr:hover {
   margin-bottom: 16px;
 }
 
+/* ---------- Checkout ---------- */
+
+.checkout-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 24px;
+  align-items: start;
+  margin-top: 20px;
+}
+
+@media (max-width: 800px) {
+  .checkout-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.checkout-form {
+  margin: 0;
+  max-width: none;
+}
+
+.checkout-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.checkout-summary__totals {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkout-summary__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+}
+
+.checkout-summary__row--total {
+  font-weight: 700;
+  color: var(--text-h);
+  font-size: 1.1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.order-card__delivery {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+.order-card__delivery h2 {
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.order-card__delivery p {
+  margin: 2px 0;
+  color: var(--text-muted);
+}
+
 /* ---------- Status badges ---------- */
 
 .status-badge {

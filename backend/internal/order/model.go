@@ -2,10 +2,24 @@ package order
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
 // Order represents a row in the orders table.
+//
+// Delivery snapshot fields (RecipientName, Phone, AddressLine1,
+// AddressLine2, City, PostalCode, Country) are nullable because orders
+// placed before the Checkout & Fulfillment V2 migration never collected
+// this information; they are pointers so a missing historical value is
+// represented as JSON `null` rather than a misleading empty string. Every
+// order created through Create (the checkout flow) populates all of these
+// except AddressLine2, which is genuinely optional (e.g. no apartment/unit
+// number).
+//
+// ItemsSubtotal, ShippingFee, and Total are always related by
+// Total = ItemsSubtotal + ShippingFee, enforced server-side at checkout
+// time; the frontend never supplies any of these three values.
 type Order struct {
 	ID        int64     `json:"id"`
 	UserID    int64     `json:"-"`
@@ -13,6 +27,21 @@ type Order struct {
 	Total     int64     `json:"total"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	RecipientName *string `json:"recipient_name"`
+	Phone         *string `json:"phone"`
+	AddressLine1  *string `json:"address_line1"`
+	AddressLine2  *string `json:"address_line2"`
+	City          *string `json:"city"`
+	PostalCode    *string `json:"postal_code"`
+	Country       *string `json:"country"`
+
+	ShippingMethod string `json:"shipping_method"`
+	ShippingFee    int64  `json:"shipping_fee"`
+	ItemsSubtotal  int64  `json:"items_subtotal"`
+
+	PaymentStatus string `json:"payment_status"`
+	PaymentMethod string `json:"payment_method"`
 }
 
 // Item is an immutable snapshot of a product at the time an order was
@@ -67,6 +96,43 @@ const (
 	StatusCancelled  = "cancelled"
 )
 
+// Payment statuses. No real payment provider is integrated yet; every
+// order starts as StatusPaymentPending and there is currently no code path
+// that moves an order to any other payment status. These exist so the
+// schema/API are ready for a real provider to be wired in later without
+// another migration.
+const (
+	PaymentStatusPending  = "pending"
+	PaymentStatusPaid     = "paid"
+	PaymentStatusFailed   = "failed"
+	PaymentStatusRefunded = "refunded"
+)
+
+// Payment methods. "manual" is the only supported value for V1 (no
+// gateway integration).
+const (
+	PaymentMethodManual = "manual"
+)
+
+// Shipping methods supported by checkout in V1. Carrier integration is out
+// of scope; these are just labels used to select a fixed backend fee (see
+// ShippingFeeFor in shipping.go).
+const (
+	ShippingMethodStandard = "standard"
+	ShippingMethodExpress  = "express"
+)
+
+var validShippingMethods = map[string]bool{
+	ShippingMethodStandard: true,
+	ShippingMethodExpress:  true,
+}
+
+// IsValidShippingMethod reports whether method is one of the supported V1
+// shipping methods.
+func IsValidShippingMethod(method string) bool {
+	return validShippingMethods[method]
+}
+
 // validStatuses is used to validate status values supplied by admins before
 // they ever reach the database.
 var validStatuses = map[string]bool{
@@ -110,3 +176,100 @@ var (
 	ErrOrderNotFound     = errors.New("order not found")
 	ErrInvalidTransition = errors.New("invalid status transition")
 )
+
+// CheckoutInput is the user-provided portion of a checkout request: the
+// delivery snapshot and chosen shipping method. It intentionally has no
+// price/fee/total fields and no user id field — the authenticated user id
+// always comes from the session, and every price is calculated
+// server-side.
+type CheckoutInput struct {
+	RecipientName  string
+	Phone          string
+	AddressLine1   string
+	AddressLine2   string
+	City           string
+	PostalCode     string
+	Country        string
+	ShippingMethod string
+}
+
+// Field length limits enforced on CheckoutInput, matching the column sizes
+// defined in 007_add_order_fulfillment.sql.
+const (
+	maxRecipientNameLen = 255
+	maxPhoneLen         = 64
+	maxAddressLineLen   = 255
+	maxCityLen          = 128
+	maxPostalCodeLen    = 32
+	maxCountryLen       = 128
+)
+
+// ErrValidation is returned by CheckoutInput.Validate when a field fails
+// validation. The Field and Message are safe to surface to the client.
+type ErrValidation struct {
+	Field   string
+	Message string
+}
+
+func (e *ErrValidation) Error() string {
+	return e.Field + ": " + e.Message
+}
+
+// Validate checks that every required field is present (after trimming
+// surrounding whitespace), within its maximum length, and that the
+// shipping method is one of the supported V1 values. It does not mutate
+// the receiver; callers should use the trimmed values returned by
+// Trimmed() when persisting.
+func (in CheckoutInput) Validate() error {
+	trimmed := in.Trimmed()
+
+	required := []struct {
+		field  string
+		value  string
+		maxLen int
+	}{
+		{"recipient_name", trimmed.RecipientName, maxRecipientNameLen},
+		{"phone", trimmed.Phone, maxPhoneLen},
+		{"address_line1", trimmed.AddressLine1, maxAddressLineLen},
+		{"city", trimmed.City, maxCityLen},
+		{"postal_code", trimmed.PostalCode, maxPostalCodeLen},
+		{"country", trimmed.Country, maxCountryLen},
+	}
+	for _, f := range required {
+		if f.value == "" {
+			return &ErrValidation{Field: f.field, Message: "is required"}
+		}
+		if len(f.value) > f.maxLen {
+			return &ErrValidation{Field: f.field, Message: "is too long"}
+		}
+	}
+
+	// address_line2 is optional but still length-limited if provided.
+	if len(trimmed.AddressLine2) > maxAddressLineLen {
+		return &ErrValidation{Field: "address_line2", Message: "is too long"}
+	}
+
+	if trimmed.ShippingMethod == "" {
+		return &ErrValidation{Field: "shipping_method", Message: "is required"}
+	}
+	if !IsValidShippingMethod(trimmed.ShippingMethod) {
+		return &ErrValidation{Field: "shipping_method", Message: "is not a supported shipping method"}
+	}
+
+	return nil
+}
+
+// Trimmed returns a copy of in with every string field's surrounding
+// whitespace removed.
+func (in CheckoutInput) Trimmed() CheckoutInput {
+	return CheckoutInput{
+		RecipientName:  strings.TrimSpace(in.RecipientName),
+		Phone:          strings.TrimSpace(in.Phone),
+		AddressLine1:   strings.TrimSpace(in.AddressLine1),
+		AddressLine2:   strings.TrimSpace(in.AddressLine2),
+		City:           strings.TrimSpace(in.City),
+		PostalCode:     strings.TrimSpace(in.PostalCode),
+		Country:        strings.TrimSpace(in.Country),
+		ShippingMethod: strings.TrimSpace(in.ShippingMethod),
+	}
+}

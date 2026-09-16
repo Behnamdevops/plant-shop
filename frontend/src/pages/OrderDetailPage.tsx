@@ -118,9 +118,8 @@ function OrderDetail({ id }: OrderDetailProps) {
 
         <div className="order-card__meta">
           <span>Placed: {new Date(order.created_at).toLocaleString()}</span>
-          <span>
-            Total: <span className="price">{order.total}</span>
-          </span>
+          <span>Payment: {order.payment_status}</span>
+          <span>Shipping: {order.shipping_method}</span>
         </div>
 
         <div className="table-wrap">
@@ -151,6 +150,39 @@ function OrderDetail({ id }: OrderDetailProps) {
             </tbody>
           </table>
         </div>
+
+        <div className="checkout-summary__totals">
+          <div className="checkout-summary__row">
+            <span>Items subtotal</span>
+            <span className="price">{order.items_subtotal}</span>
+          </div>
+          <div className="checkout-summary__row">
+            <span>Shipping fee</span>
+            <span className="price">{order.shipping_fee}</span>
+          </div>
+          <div className="checkout-summary__row checkout-summary__row--total">
+            <span>Total</span>
+            <span className="price">{order.total}</span>
+          </div>
+        </div>
+
+        {(order.recipient_name || order.address_line1) && (
+          <div className="order-card__delivery">
+            <h2>Delivery details</h2>
+            {order.recipient_name && <p>{order.recipient_name}</p>}
+            {order.phone && <p>{order.phone}</p>}
+            {order.address_line1 && <p>{order.address_line1}</p>}
+            {order.address_line2 && <p>{order.address_line2}</p>}
+            {(order.city || order.postal_code) && (
+              <p>
+                {order.city}
+                {order.city && order.postal_code ? ', ' : ''}
+                {order.postal_code}
+              </p>
+            )}
+            {order.country && <p>{order.country}</p>}
+          </div>
+        )}
       </div>
     </main>
   )
