@@ -13,7 +13,7 @@ export default function AdminRoute({ children }: { children: ReactNode }) {
   if (loading) {
     return (
       <main>
-        <p className="state-message">Loading...</p>
+        <p className="state-message">در حال بارگذاری...</p>
       </main>
     )
   }
@@ -25,9 +25,9 @@ export default function AdminRoute({ children }: { children: ReactNode }) {
   if (user.role !== 'admin') {
     return (
       <main>
-        <h1>Forbidden</h1>
+        <h1>دسترسی غیرمجاز</h1>
         <p className="alert alert-error" role="alert">
-          You don&apos;t have permission to view this page.
+          شما اجازه دسترسی به این صفحه را ندارید.
         </p>
       </main>
     )

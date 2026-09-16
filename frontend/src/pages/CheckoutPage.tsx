@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getCart } from '../api/cart'
 import { createOrder } from '../api/orders'
+import { requestZarinPalPayment } from '../api/payments'
 import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
 import { emptyCheckoutInput, SHIPPING_FEES } from '../types/checkout'
@@ -9,6 +10,8 @@ import type { CheckoutInput } from '../types/checkout'
 import { SHIPPING_METHODS } from '../types/order'
 import type { ShippingMethod } from '../types/order'
 import { useAuth } from '../hooks/useAuth'
+import { formatToman } from '../lib/format'
+import { shippingMethodLabel } from '../lib/labels'
 
 export default function CheckoutPage() {
   const { user, loading: authLoading } = useAuth()
@@ -22,6 +25,12 @@ export default function CheckoutPage() {
   const [form, setForm] = useState<CheckoutInput>(emptyCheckoutInput())
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // redirecting is set once the order was created successfully and we're
+  // waiting on the ZarinPal payment-request call before navigating the
+  // browser away to the gateway — kept separate from `submitting` so the
+  // button/message can say something more specific ("در حال انتقال به
+  // درگاه پرداخت...") than the generic "در حال ثبت سفارش...".
+  const [redirecting, setRedirecting] = useState(false)
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -39,7 +48,7 @@ export default function CheckoutPage() {
         if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
-          setLoadError(err instanceof Error ? err.message : 'Could not load cart')
+          setLoadError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سبد خرید پیش آمد')
         }
       })
       .finally(() => {
@@ -60,29 +69,53 @@ export default function CheckoutPage() {
     setSubmitError('')
     setSubmitting(true)
 
+    // Step 1: create the order. The order is created with payment_status
+    // "pending" — it is never shown to the customer as paid at this point.
+    let orderId: number
     try {
       const order = await createOrder(form)
-      navigate(`/orders/${order.id}`)
+      orderId = order.id
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else if (err instanceof ApiError && err.status === 400) {
-        setSubmitError(err.message || 'Please check the delivery details and try again.')
+        setSubmitError(err.message || 'لطفاً اطلاعات ارسال را بررسی و دوباره تلاش کنید.')
       } else if (err instanceof ApiError && err.status === 409) {
-        setSubmitError('One or more items no longer have enough stock.')
+        setSubmitError('موجودی برخی از کالاها کافی نیست.')
       } else {
-        setSubmitError(err instanceof Error ? err.message : 'Could not place order')
+        setSubmitError('ثبت سفارش با مشکل مواجه شد.')
       }
-    } finally {
       setSubmitting(false)
+      return
+    }
+
+    // Step 2: the order exists but is unpaid — immediately request a
+    // ZarinPal payment for it and redirect the browser to the gateway.
+    // If this step fails (provider unavailable, network error), the order
+    // itself is safe and unaffected: the customer can retry payment from
+    // the order detail page at any time (see OrderDetailPage/OrdersPage).
+    setSubmitting(false)
+    setRedirecting(true)
+    try {
+      const { redirect_url } = await requestZarinPalPayment(orderId)
+      window.location.assign(redirect_url)
+    } catch {
+      // Do not show a raw English provider error; the order is safely
+      // pending and payable again from its detail page.
+      navigate(`/orders/${orderId}`, {
+        state: {
+          notice:
+            'سفارش شما ثبت شد، اما اتصال به درگاه پرداخت زرین‌پال با مشکل مواجه شد. می‌توانید دوباره تلاش کنید.',
+        },
+      })
     }
   }
 
   if (authLoading || (!user && loading)) {
     return (
       <main>
-        <h1>Checkout</h1>
-        <p className="state-message">Loading checkout...</p>
+        <h1>تسویه حساب</h1>
+        <p className="state-message">در حال بارگذاری...</p>
       </main>
     )
   }
@@ -90,9 +123,9 @@ export default function CheckoutPage() {
   if (!user || unauthorized) {
     return (
       <main>
-        <h1>Checkout</h1>
+        <h1>تسویه حساب</h1>
         <p className="empty-state">
-          Please <Link to="/login">log in</Link> to check out.
+          برای تسویه حساب، <Link to="/login">وارد شوید</Link>.
         </p>
       </main>
     )
@@ -101,8 +134,8 @@ export default function CheckoutPage() {
   if (loading) {
     return (
       <main>
-        <h1>Checkout</h1>
-        <p className="state-message">Loading checkout...</p>
+        <h1>تسویه حساب</h1>
+        <p className="state-message">در حال بارگذاری...</p>
       </main>
     )
   }
@@ -110,12 +143,12 @@ export default function CheckoutPage() {
   if (loadError) {
     return (
       <main>
-        <h1>Checkout</h1>
+        <h1>تسویه حساب</h1>
         <p className="alert alert-error" role="alert">
           {loadError}
         </p>
         <Link to="/cart" className="back-link">
-          ← Back to cart
+          → بازگشت به سبد خرید
         </Link>
       </main>
     )
@@ -124,9 +157,9 @@ export default function CheckoutPage() {
   if (!cart || cart.items.length === 0) {
     return (
       <main>
-        <h1>Checkout</h1>
+        <h1>تسویه حساب</h1>
         <p className="empty-state">
-          Your cart is empty. <Link to="/">Browse products</Link>
+          سبد خرید شما خالی است. <Link to="/">مشاهده محصولات</Link>
         </p>
       </main>
     )
@@ -136,20 +169,22 @@ export default function CheckoutPage() {
   const itemsSubtotal = cart.total
   const estimatedTotal = itemsSubtotal + shippingFee
 
+  const busy = submitting || redirecting
+
   return (
     <main>
       <Link to="/cart" className="back-link">
-        ← Back to cart
+        → بازگشت به سبد خرید
       </Link>
 
-      <h1>Checkout</h1>
+      <h1>تسویه حساب</h1>
 
       <div className="checkout-layout">
         <form className="form-card checkout-form" onSubmit={handleSubmit}>
-          <h2>Delivery details</h2>
+          <h2>اطلاعات ارسال</h2>
 
           <div className="form-field">
-            <label htmlFor="recipient_name">Recipient name</label>
+            <label htmlFor="recipient_name">نام گیرنده</label>
             <input
               id="recipient_name"
               type="text"
@@ -157,25 +192,27 @@ export default function CheckoutPage() {
               maxLength={255}
               value={form.recipient_name}
               onChange={handleChange('recipient_name')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="phone">Phone</label>
+            <label htmlFor="phone">شماره موبایل</label>
             <input
               id="phone"
               type="tel"
               required
               maxLength={64}
+              placeholder="09xxxxxxxxx"
+              inputMode="tel"
               value={form.phone}
               onChange={handleChange('phone')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="address_line1">Address line 1</label>
+            <label htmlFor="address_line1">آدرس (خط اول)</label>
             <input
               id="address_line1"
               type="text"
@@ -183,24 +220,24 @@ export default function CheckoutPage() {
               maxLength={255}
               value={form.address_line1}
               onChange={handleChange('address_line1')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="address_line2">Address line 2 (optional)</label>
+            <label htmlFor="address_line2">آدرس (خط دوم - اختیاری)</label>
             <input
               id="address_line2"
               type="text"
               maxLength={255}
               value={form.address_line2}
               onChange={handleChange('address_line2')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="city">City</label>
+            <label htmlFor="city">شهر</label>
             <input
               id="city"
               type="text"
@@ -208,25 +245,26 @@ export default function CheckoutPage() {
               maxLength={128}
               value={form.city}
               onChange={handleChange('city')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="postal_code">Postal code</label>
+            <label htmlFor="postal_code">کد پستی</label>
             <input
               id="postal_code"
               type="text"
               required
               maxLength={32}
+              inputMode="numeric"
               value={form.postal_code}
               onChange={handleChange('postal_code')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="country">Country</label>
+            <label htmlFor="country">کشور</label>
             <input
               id="country"
               type="text"
@@ -234,21 +272,21 @@ export default function CheckoutPage() {
               maxLength={128}
               value={form.country}
               onChange={handleChange('country')}
-              disabled={submitting}
+              disabled={busy}
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="shipping_method">Shipping method</label>
+            <label htmlFor="shipping_method">روش ارسال</label>
             <select
               id="shipping_method"
               value={form.shipping_method}
               onChange={handleChange('shipping_method')}
-              disabled={submitting}
+              disabled={busy}
             >
               {SHIPPING_METHODS.map((method: ShippingMethod) => (
                 <option key={method} value={method}>
-                  {method === 'standard' ? 'Standard' : 'Express'} — <span className="price">{SHIPPING_FEES[method]}</span>
+                  {shippingMethodLabel(method)} — {formatToman(SHIPPING_FEES[method])}
                 </option>
               ))}
             </select>
@@ -260,21 +298,25 @@ export default function CheckoutPage() {
             </p>
           )}
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
-            {submitting ? 'Placing order...' : 'Place order'}
+          <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+            {redirecting
+              ? 'در حال انتقال به درگاه پرداخت زرین‌پال...'
+              : submitting
+                ? 'در حال ثبت سفارش...'
+                : 'ثبت سفارش و پرداخت'}
           </button>
         </form>
 
         <div className="checkout-summary">
-          <h2>Order summary</h2>
+          <h2>خلاصه سفارش</h2>
 
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Product</th>
-                  <th>Qty</th>
-                  <th>Subtotal</th>
+                  <th>محصول</th>
+                  <th>تعداد</th>
+                  <th>جمع جزء</th>
                 </tr>
               </thead>
               <tbody>
@@ -282,7 +324,7 @@ export default function CheckoutPage() {
                   <tr key={item.id}>
                     <td>{item.name}</td>
                     <td>{item.quantity}</td>
-                    <td className="price">{item.subtotal}</td>
+                    <td className="price">{formatToman(item.subtotal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -291,20 +333,20 @@ export default function CheckoutPage() {
 
           <div className="checkout-summary__totals">
             <div className="checkout-summary__row">
-              <span>Items subtotal</span>
-              <span className="price">{itemsSubtotal}</span>
+              <span>جمع جزء کالاها</span>
+              <span className="price">{formatToman(itemsSubtotal)}</span>
             </div>
             <div className="checkout-summary__row">
-              <span>Shipping ({form.shipping_method})</span>
-              <span className="price">{shippingFee}</span>
+              <span>هزینه ارسال ({shippingMethodLabel(form.shipping_method)})</span>
+              <span className="price">{formatToman(shippingFee)}</span>
             </div>
             <div className="checkout-summary__row checkout-summary__row--total">
-              <span>Estimated total</span>
-              <span className="price">{estimatedTotal}</span>
+              <span>جمع کل (تخمینی)</span>
+              <span className="price">{formatToman(estimatedTotal)}</span>
             </div>
           </div>
           <p className="page-subtitle">
-            The final total is calculated by the server when you place your order.
+            جمع نهایی هنگام ثبت سفارش توسط سرور محاسبه می‌شود. پس از ثبت سفارش، به درگاه پرداخت زرین‌پال منتقل خواهید شد.
           </p>
         </div>
       </div>

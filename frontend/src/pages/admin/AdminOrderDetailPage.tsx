@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getAdminOrder, updateAdminOrderStatus } from '../../api/orders'
+import { getAdminOrder, getAdminOrderPayments, updateAdminOrderStatus } from '../../api/orders'
 import { ApiError } from '../../api/errors'
-import type { AdminOrderDetails } from '../../types/order'
+import type { AdminOrderDetails, PaymentAttempt } from '../../types/order'
 import { ORDER_STATUS_TRANSITIONS } from '../../types/order'
+import { formatDateFa, formatToman } from '../../lib/format'
+import { orderStatusLabel, paymentMethodLabel, paymentStatusLabel, shippingMethodLabel } from '../../lib/labels'
 
 type AdminOrderDetailProps = {
   id: number
@@ -14,6 +16,7 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notFound, setNotFound] = useState(false)
+  const [payments, setPayments] = useState<PaymentAttempt[]>([])
 
   const [selectedStatus, setSelectedStatus] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -33,11 +36,23 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
         if (err instanceof ApiError && err.status === 404) {
           setNotFound(true)
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load order')
+          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سفارش پیش آمد')
         }
       })
       .finally(() => {
         if (!ignore) setLoading(false)
+      })
+
+    // Payment attempts are ZarinPal-specific and only exist for orders
+    // paid (or attempted) via the gateway; a failure here (e.g. no
+    // attempts yet) is not shown as a page-level error — the ref_id
+    // section simply stays empty.
+    getAdminOrderPayments(id)
+      .then((data) => {
+        if (!ignore) setPayments(data)
+      })
+      .catch(() => {
+        /* non-critical */
       })
 
     return () => {
@@ -64,11 +79,17 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
       setSelectedStatus('')
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setStatusError(`Cannot change status from "${order.status}" to "${selectedStatus}".`)
+        // The backend returns 409 both for a plain invalid state-machine
+        // transition and for the ZarinPal "must be paid first" gate — the
+        // response body text differs, but we show one clear Persian
+        // message covering both cases rather than parsing English text.
+        setStatusError(
+          `تغییر وضعیت از «${orderStatusLabel(order.status)}» به «${orderStatusLabel(selectedStatus)}» ممکن نیست. اگر این سفارش با زرین‌پال پرداخت می‌شود، ابتدا باید پرداخت آن تأیید شده باشد.`,
+        )
       } else if (err instanceof ApiError && err.status === 400) {
-        setStatusError('Invalid status.')
+        setStatusError('وضعیت نامعتبر است.')
       } else {
-        setStatusError(err instanceof Error ? err.message : 'Could not update status')
+        setStatusError('به‌روزرسانی وضعیت با مشکل مواجه شد.')
       }
     } finally {
       setSubmitting(false)
@@ -78,8 +99,8 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
   if (loading) {
     return (
       <main>
-        <h1>Order details</h1>
-        <p className="state-message">Loading order...</p>
+        <h1>جزئیات سفارش</h1>
+        <p className="state-message">در حال بارگذاری سفارش...</p>
       </main>
     )
   }
@@ -87,10 +108,10 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
   if (notFound) {
     return (
       <main>
-        <h1>Order details</h1>
-        <p className="empty-state">Order not found.</p>
+        <h1>جزئیات سفارش</h1>
+        <p className="empty-state">سفارش یافت نشد.</p>
         <Link to="/admin/orders" className="back-link">
-          ← Back to orders
+          → بازگشت به سفارش‌ها
         </Link>
       </main>
     )
@@ -99,54 +120,66 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
   if (error || !order) {
     return (
       <main>
-        <h1>Order details</h1>
+        <h1>جزئیات سفارش</h1>
         <p className="alert alert-error" role="alert">
-          {error || 'Could not load order'}
+          {error || 'مشکلی در بارگذاری سفارش پیش آمد'}
         </p>
         <Link to="/admin/orders" className="back-link">
-          ← Back to orders
+          → بازگشت به سفارش‌ها
         </Link>
       </main>
     )
   }
 
+  const verifiedPayments = payments.filter((p) => p.status === 'paid')
+
   return (
     <main>
       <Link to="/admin/orders" className="back-link">
-        ← Back to orders
+        → بازگشت به سفارش‌ها
       </Link>
 
       <div className="order-card">
         <div className="order-card__header">
-          <h1>Order #{order.id}</h1>
-          <span className="status-badge">{order.status}</span>
+          <h1>سفارش #{order.id}</h1>
+          <span className="status-badge">{orderStatusLabel(order.status)}</span>
         </div>
 
         <div className="order-card__meta">
-          <span>Customer: {order.customer.name} ({order.customer.email})</span>
-          <span>Placed: {new Date(order.created_at).toLocaleString()}</span>
-          <span>Updated: {new Date(order.updated_at).toLocaleString()}</span>
-          <span>Payment: {order.payment_status} ({order.payment_method})</span>
-          <span>Shipping: {order.shipping_method}</span>
+          <span>مشتری: {order.customer.name} ({order.customer.email})</span>
+          <span>تاریخ ثبت: {formatDateFa(order.created_at)}</span>
+          <span>آخرین به‌روزرسانی: {formatDateFa(order.updated_at)}</span>
+          <span>
+            پرداخت: {paymentStatusLabel(order.payment_status)} ({paymentMethodLabel(order.payment_method)})
+          </span>
+          <span>ارسال: {shippingMethodLabel(order.shipping_method)}</span>
         </div>
+
+        {verifiedPayments.length > 0 && (
+          <div className="order-card__meta">
+            <span>
+              شناسه پیگیری زرین‌پال: {verifiedPayments[0].ref_id ?? '—'}
+            </span>
+          </div>
+        )}
 
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Product</th>
-                <th>Unit price</th>
-                <th>Quantity</th>
-                <th>Subtotal</th>
+                <th>محصول</th>
+                <th>قیمت واحد</th>
+                <th>تعداد</th>
+                <th>جمع جزء</th>
               </tr>
             </thead>
             <tbody>
               {order.items.map((item) => (
                 <tr key={item.id}>
                   <td>{item.product_name}</td>
-                  <td className="price">{item.unit_price}</td>
+                  <td className="price">{formatToman(item.unit_price)}</td>
                   <td>{item.quantity}</td>
-                  <td className="price">{item.subtotal}</td>
+                  <td className="price">{formatToman(item.subtotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -155,22 +188,22 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
 
         <div className="checkout-summary__totals">
           <div className="checkout-summary__row">
-            <span>Items subtotal</span>
-            <span className="price">{order.items_subtotal}</span>
+            <span>جمع جزء کالاها</span>
+            <span className="price">{formatToman(order.items_subtotal)}</span>
           </div>
           <div className="checkout-summary__row">
-            <span>Shipping fee</span>
-            <span className="price">{order.shipping_fee}</span>
+            <span>هزینه ارسال</span>
+            <span className="price">{formatToman(order.shipping_fee)}</span>
           </div>
           <div className="checkout-summary__row checkout-summary__row--total">
-            <span>Total</span>
-            <span className="price">{order.total}</span>
+            <span>جمع کل</span>
+            <span className="price">{formatToman(order.total)}</span>
           </div>
         </div>
 
         {(order.recipient_name || order.address_line1) && (
           <div className="order-card__delivery">
-            <h2>Delivery address</h2>
+            <h2>آدرس ارسال</h2>
             {order.recipient_name && <p>{order.recipient_name}</p>}
             {order.phone && <p>{order.phone}</p>}
             {order.address_line1 && <p>{order.address_line1}</p>}
@@ -178,7 +211,7 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
             {(order.city || order.postal_code) && (
               <p>
                 {order.city}
-                {order.city && order.postal_code ? ', ' : ''}
+                {order.city && order.postal_code ? '، ' : ''}
                 {order.postal_code}
               </p>
             )}
@@ -187,9 +220,9 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
         )}
 
         <div className="form-field" style={{ marginTop: 24 }}>
-          <label htmlFor="order-status">Update status</label>
+          <label htmlFor="order-status">به‌روزرسانی وضعیت</label>
           {availableTransitions.length === 0 ? (
-            <p className="empty-state">This order is in a final state and cannot be changed further.</p>
+            <p className="empty-state">این سفارش در وضعیت نهایی است و دیگر قابل تغییر نیست.</p>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
               <select
@@ -198,10 +231,10 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
                 onChange={(event) => setSelectedStatus(event.target.value)}
                 disabled={submitting}
               >
-                <option value="">Select a status...</option>
+                <option value="">انتخاب وضعیت...</option>
                 {availableTransitions.map((status) => (
                   <option key={status} value={status}>
-                    {status}
+                    {orderStatusLabel(status)}
                   </option>
                 ))}
               </select>
@@ -211,7 +244,7 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
                 onClick={handleStatusSubmit}
                 disabled={submitting || !selectedStatus}
               >
-                {submitting ? 'Updating...' : 'Update status'}
+                {submitting ? 'در حال به‌روزرسانی...' : 'به‌روزرسانی وضعیت'}
               </button>
             </div>
           )}
@@ -233,8 +266,8 @@ export default function AdminOrderDetailPage() {
   if (!id || !Number.isFinite(orderId) || orderId <= 0) {
     return (
       <main>
-        <p>Invalid order</p>
-        <Link to="/admin/orders">Back to orders</Link>
+        <p>سفارش نامعتبر</p>
+        <Link to="/admin/orders">بازگشت به سفارش‌ها</Link>
       </main>
     )
   }

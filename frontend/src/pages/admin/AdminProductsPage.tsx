@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { deleteProduct, getProducts } from '../../api/products'
 import { ApiError } from '../../api/errors'
 import type { Product } from '../../types/product'
+import { formatToman } from '../../lib/format'
 
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[] | null>(null)
@@ -26,7 +27,7 @@ export default function AdminProductsPage() {
         if (!ignore) setProducts(data)
       })
       .catch((err) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load products')
+        if (!ignore) setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری محصولات پیش آمد')
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -38,7 +39,7 @@ export default function AdminProductsPage() {
   }, [reloadKey])
 
   const handleDelete = async (product: Product) => {
-    const confirmed = window.confirm(`Delete "${product.name}"? This cannot be undone.`)
+    const confirmed = window.confirm(`محصول «${product.name}» حذف شود؟ این عمل قابل بازگشت نیست.`)
     if (!confirmed) {
       return
     }
@@ -51,11 +52,9 @@ export default function AdminProductsPage() {
       setProducts((current) => (current ? current.filter((p) => p.id !== product.id) : current))
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setDeleteError(
-          `"${product.name}" cannot be deleted because it is referenced by existing orders.`,
-        )
+        setDeleteError(`محصول «${product.name}» به دلیل وجود سفارش‌های مرتبط قابل حذف نیست.`)
       } else {
-        setDeleteError(err instanceof Error ? err.message : 'Could not delete product')
+        setDeleteError(err instanceof Error ? err.message : 'مشکلی در حذف محصول پیش آمد')
       }
     } finally {
       setDeletingId(null)
@@ -65,12 +64,12 @@ export default function AdminProductsPage() {
   return (
     <main>
       <div className="page-header">
-        <h1>Admin · Products</h1>
-        <p className="page-subtitle">Manage the product catalog.</p>
+        <h1>مدیریت · محصولات</h1>
+        <p className="page-subtitle">مدیریت فهرست محصولات فروشگاه.</p>
       </div>
 
       <Link to="/admin/products/new" className="btn btn-primary">
-        + New product
+        + محصول جدید
       </Link>
 
       {deleteError && (
@@ -79,7 +78,7 @@ export default function AdminProductsPage() {
         </p>
       )}
 
-      {loading && <p className="state-message">Loading products...</p>}
+      {loading && <p className="state-message">در حال بارگذاری محصولات...</p>}
 
       {!loading && error && (
         <>
@@ -87,13 +86,13 @@ export default function AdminProductsPage() {
             {error}
           </p>
           <button type="button" className="btn btn-secondary" onClick={reload}>
-            Retry
+            تلاش دوباره
           </button>
         </>
       )}
 
       {!loading && !error && products && products.length === 0 && (
-        <p className="empty-state">No products yet.</p>
+        <p className="empty-state">هنوز محصولی ثبت نشده است.</p>
       )}
 
       {!loading && !error && products && products.length > 0 && (
@@ -101,10 +100,10 @@ export default function AdminProductsPage() {
           <table>
             <thead>
               <tr>
-                <th>Name</th>
+                <th>نام</th>
                 <th>Slug</th>
-                <th>Price</th>
-                <th>Stock</th>
+                <th>قیمت</th>
+                <th>موجودی</th>
                 <th></th>
               </tr>
             </thead>
@@ -113,12 +112,12 @@ export default function AdminProductsPage() {
                 <tr key={product.id}>
                   <td>{product.name}</td>
                   <td>{product.slug}</td>
-                  <td className="price">{product.price}</td>
+                  <td className="price">{formatToman(product.price)}</td>
                   <td>{product.stock}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Link to={`/admin/products/${product.id}/edit`} className="btn btn-secondary btn-sm">
-                        Edit
+                        ویرایش
                       </Link>
                       <button
                         type="button"
@@ -126,7 +125,7 @@ export default function AdminProductsPage() {
                         onClick={() => handleDelete(product)}
                         disabled={deletingId === product.id}
                       >
-                        {deletingId === product.id ? 'Deleting...' : 'Delete'}
+                        {deletingId === product.id ? 'در حال حذف...' : 'حذف'}
                       </button>
                     </div>
                   </td>

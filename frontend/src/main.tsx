@@ -4,12 +4,8 @@ import './index.css'
 import App from './App.tsx'
 import { storeConfig } from './config'
 
-// Expose the configured currency symbol to CSS (see .price::before in
-// App.css) and set the document title from the configured store name.
-document.documentElement.style.setProperty(
-  '--currency-symbol',
-  `'${storeConfig.currencySymbol}'`,
-)
+// Set the document title from the configured store name. Price display no
+// longer goes through a CSS custom property — see src/lib/format.ts.
 document.title = storeConfig.name
 
 createRoot(document.getElementById('root')!).render(

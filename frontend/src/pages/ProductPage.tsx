@@ -4,6 +4,7 @@ import { getProduct } from '../api/products'
 import { addCartItem } from '../api/cart'
 import type { Product } from '../types/product'
 import { useAuth } from '../hooks/useAuth'
+import { formatToman } from '../lib/format'
 
 type ProductDetailsProps = {
   slug: string
@@ -29,7 +30,7 @@ function ProductDetails({ slug }: ProductDetailsProps) {
       })
       .catch(() => {
         if (!ignore) {
-          setError('Could not load product')
+          setError('مشکلی در بارگذاری محصول پیش آمد')
         }
       })
       .finally(() => {
@@ -46,7 +47,7 @@ function ProductDetails({ slug }: ProductDetailsProps) {
   if (loading) {
     return (
       <main>
-        <p className="state-message">Loading product...</p>
+        <p className="state-message">در حال بارگذاری محصول...</p>
       </main>
     )
   }
@@ -55,10 +56,10 @@ function ProductDetails({ slug }: ProductDetailsProps) {
     return (
       <main>
         <p className="alert alert-error" role="alert">
-          {error || 'Product not found'}
+          {error || 'محصول یافت نشد'}
         </p>
         <Link to="/" className="back-link">
-          ← Back to products
+          → بازگشت به محصولات
         </Link>
       </main>
     )
@@ -71,9 +72,9 @@ function ProductDetails({ slug }: ProductDetailsProps) {
 
     try {
       await addCartItem(product.id, 1)
-      setCartMessage('Added to cart')
+      setCartMessage('به سبد خرید اضافه شد')
     } catch (err) {
-      setCartError(err instanceof Error ? err.message : 'Could not add to cart')
+      setCartError(err instanceof Error ? err.message : 'مشکلی در افزودن به سبد خرید پیش آمد')
     } finally {
       setAddingToCart(false)
     }
@@ -82,7 +83,7 @@ function ProductDetails({ slug }: ProductDetailsProps) {
   return (
     <main>
       <Link to="/" className="back-link">
-        ← Back
+        → بازگشت
       </Link>
 
       <div className="product-detail">
@@ -100,11 +101,11 @@ function ProductDetails({ slug }: ProductDetailsProps) {
           <h1>{product.name}</h1>
 
           <div className="product-detail__price-row">
-            <span className="price">{product.price}</span>
+            <span className="price">{formatToman(product.price)}</span>
             {product.stock > 0 ? (
-              <span className="badge badge-in-stock">In stock ({product.stock})</span>
+              <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
             ) : (
-              <span className="badge badge-out-of-stock">Out of stock</span>
+              <span className="badge badge-out-of-stock">ناموجود</span>
             )}
           </div>
 
@@ -120,10 +121,10 @@ function ProductDetails({ slug }: ProductDetailsProps) {
                   disabled={product.stock <= 0 || addingToCart}
                 >
                   {product.stock <= 0
-                    ? 'Out of stock'
+                    ? 'ناموجود'
                     : addingToCart
-                      ? 'Adding...'
-                      : 'Add to cart'}
+                      ? 'در حال افزودن...'
+                      : 'افزودن به سبد خرید'}
                 </button>
                 {cartMessage && (
                   <p className="alert alert-success" role="status">
@@ -138,7 +139,7 @@ function ProductDetails({ slug }: ProductDetailsProps) {
               </>
             ) : (
               <p>
-                <Link to="/login">Log in</Link> to add this product to your cart.
+                برای افزودن این محصول به سبد خرید، <Link to="/login">وارد شوید</Link>.
               </p>
             )
           )}
@@ -154,8 +155,8 @@ export default function ProductPage() {
   if (!slug) {
     return (
       <main>
-        <p>Invalid product</p>
-        <Link to="/">Back to products</Link>
+        <p>محصول نامعتبر</p>
+        <Link to="/">بازگشت به محصولات</Link>
       </main>
     )
   }

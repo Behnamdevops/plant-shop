@@ -108,10 +108,13 @@ const (
 	PaymentStatusRefunded = "refunded"
 )
 
-// Payment methods. "manual" is the only supported value for V1 (no
-// gateway integration).
+// Payment methods. "manual" is the original placeholder (no gateway
+// integration); "zarinpal" is set once an order has an associated ZarinPal
+// payment attempt (see the payment package), regardless of whether that
+// attempt has been verified yet.
 const (
-	PaymentMethodManual = "manual"
+	PaymentMethodManual   = "manual"
+	PaymentMethodZarinPal = "zarinpal"
 )
 
 // Shipping methods supported by checkout in V1. Carrier integration is out
@@ -169,12 +172,44 @@ func CanTransition(from, to string) bool {
 	return next[to]
 }
 
+// fulfillmentStatuses is the set of statuses that represent the seller
+// actually fulfilling the order (as opposed to pending or cancelled).
+// Advancing a ZarinPal order into any of these requires payment_status =
+// "paid" first (see RequiresPaidPayment).
+var fulfillmentStatuses = map[string]bool{
+	StatusProcessing: true,
+	StatusShipped:    true,
+	StatusDelivered:  true,
+}
+
+// RequiresPaidPayment reports whether transitioning a ZarinPal order to
+// newStatus requires payment_status to already be "paid". Orders paid
+// through "manual" are unaffected by this rule — it only applies to the
+// zarinpal payment method, since that is the only method V1 can verify
+// server-side. Cancelling (from any status) is never gated.
+func RequiresPaidPayment(paymentMethod, newStatus string) bool {
+	return paymentMethod == PaymentMethodZarinPal && fulfillmentStatuses[newStatus]
+}
+
 var (
 	ErrEmptyCart         = errors.New("cart is empty")
 	ErrInsufficientStock = errors.New("insufficient stock")
 	ErrProductNotFound   = errors.New("product not found")
 	ErrOrderNotFound     = errors.New("order not found")
 	ErrInvalidTransition = errors.New("invalid status transition")
+
+	// ErrPaymentRequired is returned by UpdateStatus when an admin attempts
+	// to advance a ZarinPal order (payment_method = "zarinpal") into
+	// processing/shipped/delivered while its payment_status is not yet
+	// "paid". Fulfillment of a gateway-paid order must wait for a verified
+	// payment; "manual" orders are unaffected by this rule.
+	ErrPaymentRequired = errors.New("payment required before fulfillment")
+
+	// ErrOrderNotEligibleForCancel is returned by CancelOwnOrder when the
+	// order's payment has already succeeded (payment_status = "paid").
+	// Customers may only self-cancel unpaid orders; a paid order requires
+	// admin-mediated cancellation/refund instead.
+	ErrOrderNotEligibleForCancel = errors.New("order is not eligible for self-service cancellation")
 )
 
 // CheckoutInput is the user-provided portion of a checkout request: the

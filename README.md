@@ -53,6 +53,9 @@ psql $env:DATABASE_URL -f backend/migrations/002_create_users_and_sessions.sql
 psql $env:DATABASE_URL -f backend/migrations/003_create_cart_items.sql
 psql $env:DATABASE_URL -f backend/migrations/004_create_orders.sql
 psql $env:DATABASE_URL -f backend/migrations/005_add_user_role.sql
+psql $env:DATABASE_URL -f backend/migrations/006_add_order_status_constraint.sql
+psql $env:DATABASE_URL -f backend/migrations/007_add_order_fulfillment.sql
+psql $env:DATABASE_URL -f backend/migrations/008_add_zarinpal_payments.sql
 ```
 
 ### 3. Run the backend
@@ -95,6 +98,29 @@ If `DATABASE_URL` is unset, they skip automatically. Point it at your local
 `docker compose` Postgres to run them for real; they clean up their own
 rows.
 
+## ZarinPal Payment V1
+
+- `POST /api/v1/orders/{id}/payments/zarinpal` — authenticated; starts a
+  ZarinPal payment attempt for the caller's own order (amount is always the
+  order's persisted total) and returns `{"redirect_url": "..."}` to send the
+  browser to.
+- `GET /api/v1/payments/zarinpal/callback` — public; ZarinPal redirects the
+  browser here after the gateway flow. Looks up the attempt by `Authority`,
+  verifies server-to-server against ZarinPal (never trusts the callback's
+  `Status` alone), then redirects to the frontend's `/payment/result` page.
+- `POST /api/v1/orders/{id}/cancel` — authenticated; lets a customer cancel
+  their own order while it's still pending/processing and unpaid, restoring
+  inventory via the same code path as admin cancellation.
+- Orders paid via ZarinPal cannot be advanced to processing/shipped/
+  delivered by an admin until payment_status is `paid` (409 otherwise).
+- Payment attempts are stored in `payment_attempts`
+  (`backend/migrations/008_add_zarinpal_payments.sql`), separate from
+  `orders`, so a retried/abandoned attempt never overwrites order history.
+- **Remaining gap**: there is no background job to expire/release stock for
+  orders whose ZarinPal attempt was abandoned without ever returning to the
+  callback. Customers can self-cancel manually (above); an automatic
+  timeout worker is not implemented in V1.
+
 ### 6. Lint / build the frontend
 
 ```sh
@@ -126,16 +152,37 @@ Backend (`backend/.env.example`):
 | `DATABASE_URL` | yes | — | Postgres connection string |
 | `PORT` | no | `8080` | HTTP listen port |
 | `APP_ENV` | no | `development` | Set to `production` to mark session cookies `Secure` |
+| `ZARINPAL_MERCHANT_ID` | for payments | — | Your 36-character ZarinPal Merchant ID. Never commit a real value. |
+| `ZARINPAL_CALLBACK_URL` | for payments | — | Full URL ZarinPal redirects the browser back to; **must be a publicly reachable HTTPS domain in production** — see "ZarinPal payments in production" below. |
+| `ZARINPAL_SANDBOX` | no | unset (production) | Set to `true` to use ZarinPal's sandbox environment instead of real payments. |
+
+If `ZARINPAL_MERCHANT_ID`/`ZARINPAL_CALLBACK_URL` are unset, the payment
+endpoints stay registered but any request to them fails cleanly with a
+provider error (ZarinPal always rejects an empty merchant id) — the rest of
+the app (browsing, cart, "manual" checkout) is unaffected.
 
 Frontend build args (`frontend/.env.example`), baked in at build time:
 
 | Variable | Required | Default |
 |---|---|---|
 | `VITE_STORE_NAME` | no | `Plant Shop` |
-| `VITE_CURRENCY_SYMBOL` | no | `$` |
+| `VITE_CURRENCY_SYMBOL` | no | `$` (unused in the Persian storefront, which always displays تومان) |
 
 Compose-level (`.env.prod.example`): `POSTGRES_USER`, `POSTGRES_PASSWORD`,
-`POSTGRES_DB`, `FRONTEND_PORT`.
+`POSTGRES_DB`, `FRONTEND_PORT`, `ZARINPAL_MERCHANT_ID`,
+`ZARINPAL_CALLBACK_URL`, `ZARINPAL_SANDBOX`.
+
+### ZarinPal payments in production
+
+`ZARINPAL_CALLBACK_URL` must be a **publicly reachable HTTPS URL** pointing
+at `https://<your-domain>/api/v1/payments/zarinpal/callback`. ZarinPal's
+servers redirect the customer's browser to this URL after the gateway flow
+completes, and the browser must be able to reach it from the public
+internet — `http://localhost:...` or any private/internal address will not
+work for real production traffic. Use ZarinPal's sandbox
+(`ZARINPAL_SANDBOX=true`) while developing, and only point a real Merchant
+ID + production callback URL at a domain you've actually deployed the app
+to with a valid TLS certificate.
 
 ### Running the production stack
 

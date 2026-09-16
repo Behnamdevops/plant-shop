@@ -21,25 +21,25 @@ export default function Header() {
       </Link>
 
       <nav className="site-header__nav">
-        <Link to="/cart">Cart</Link>
+        <Link to="/cart">سبد خرید</Link>
         {loading ? null : user ? (
           <>
-            <Link to="/orders">Orders</Link>
+            <Link to="/orders">سفارش‌های من</Link>
             {user.role === 'admin' && (
               <>
-                <Link to="/admin/products">Admin Products</Link>
-                <Link to="/admin/orders">Admin Orders</Link>
+                <Link to="/admin/products">مدیریت محصولات</Link>
+                <Link to="/admin/orders">مدیریت سفارش‌ها</Link>
               </>
             )}
-            <span className="site-header__user">Hi, {user.name}</span>
+            <span className="site-header__user">سلام، {user.name}</span>
             <button type="button" className="btn btn-secondary btn-sm" onClick={handleLogout}>
-              Log out
+              خروج
             </button>
           </>
         ) : (
           <>
-            <Link to="/login">Log in</Link>
-            <Link to="/register">Register</Link>
+            <Link to="/login">ورود</Link>
+            <Link to="/register">ثبت‌نام</Link>
           </>
         )}
       </nav>

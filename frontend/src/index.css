@@ -27,8 +27,8 @@
   --radius: 10px;
   --radius-lg: 16px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: 'Vazirmatn', Tahoma, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: 'Vazirmatn', Tahoma, system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
   font: 16px/1.55 var(--sans);

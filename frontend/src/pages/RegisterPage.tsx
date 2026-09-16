@@ -18,12 +18,12 @@ export default function RegisterPage() {
     setError('')
 
     if (!name.trim() || !email.trim() || !password) {
-      setError('Name, email, and password are required')
+      setError('نام، ایمیل و رمز عبور الزامی است')
       return
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters')
+      setError('رمز عبور باید حداقل ۸ کاراکتر باشد')
       return
     }
 
@@ -33,7 +33,7 @@ export default function RegisterPage() {
       await register({ name: name.trim(), email: email.trim(), password })
       navigate('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed')
+      setError(err instanceof Error ? err.message : 'ثبت‌نام ناموفق بود')
     } finally {
       setSubmitting(false)
     }
@@ -42,11 +42,11 @@ export default function RegisterPage() {
   return (
     <main>
       <div className="form-card">
-        <h1>Register</h1>
+        <h1>ثبت‌نام</h1>
 
         <form onSubmit={handleSubmit}>
           <div className="form-field">
-            <label htmlFor="register-name">Name</label>
+            <label htmlFor="register-name">نام</label>
             <input
               id="register-name"
               type="text"
@@ -58,7 +58,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="register-email">Email</label>
+            <label htmlFor="register-email">ایمیل</label>
             <input
               id="register-email"
               type="email"
@@ -70,7 +70,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="register-password">Password</label>
+            <label htmlFor="register-password">رمز عبور</label>
             <input
               id="register-password"
               type="password"
@@ -89,12 +89,12 @@ export default function RegisterPage() {
           )}
 
           <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
-            {submitting ? 'Registering...' : 'Register'}
+            {submitting ? 'در حال ثبت‌نام...' : 'ثبت‌نام'}
           </button>
         </form>
 
         <p className="form-footer">
-          Already have an account? <Link to="/login">Log in</Link>
+          قبلاً حساب کاربری ساخته‌اید؟ <Link to="/login">وارد شوید</Link>
         </p>
       </div>
     </main>

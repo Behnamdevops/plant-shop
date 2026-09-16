@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { getOrder } from '../api/orders'
+import { Link, useLocation, useParams } from 'react-router-dom'
+import { cancelOrder, getOrder } from '../api/orders'
+import { requestZarinPalPayment } from '../api/payments'
 import { ApiError } from '../api/errors'
 import type { OrderDetails } from '../types/order'
 import { useAuth } from '../hooks/useAuth'
+import { formatDateFa, formatToman } from '../lib/format'
+import { orderStatusLabel, paymentStatusLabel, shippingMethodLabel } from '../lib/labels'
 
 type OrderDetailProps = {
   id: number
@@ -11,11 +14,17 @@ type OrderDetailProps = {
 
 function OrderDetail({ id }: OrderDetailProps) {
   const { user, loading: authLoading } = useAuth()
+  const location = useLocation()
+  const notice = (location.state as { notice?: string } | null)?.notice ?? ''
   const [order, setOrder] = useState<OrderDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [unauthorized, setUnauthorized] = useState(false)
   const [notFound, setNotFound] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [payError, setPayError] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState('')
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -37,7 +46,7 @@ function OrderDetail({ id }: OrderDetailProps) {
         } else if (err instanceof ApiError && err.status === 404) {
           setNotFound(true)
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load order')
+          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سفارش پیش آمد')
         }
       })
       .finally(() => {
@@ -49,11 +58,40 @@ function OrderDetail({ id }: OrderDetailProps) {
     }
   }, [authLoading, user, id])
 
+  const handlePay = async () => {
+    setPayError('')
+    setPaying(true)
+    try {
+      const { redirect_url } = await requestZarinPalPayment(id)
+      window.location.assign(redirect_url)
+    } catch {
+      setPayError('اتصال به درگاه پرداخت زرین‌پال با مشکل مواجه شد. دوباره تلاش کنید.')
+      setPaying(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    setCancelError('')
+    setCancelling(true)
+    try {
+      const updated = await cancelOrder(id)
+      setOrder(updated)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setCancelError('این سفارش دیگر قابل لغو نیست.')
+      } else {
+        setCancelError('لغو سفارش با مشکل مواجه شد.')
+      }
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   if (authLoading || (!user && loading)) {
     return (
       <main>
-        <h1>Order details</h1>
-        <p className="state-message">Loading order...</p>
+        <h1>جزئیات سفارش</h1>
+        <p className="state-message">در حال بارگذاری سفارش...</p>
       </main>
     )
   }
@@ -61,9 +99,9 @@ function OrderDetail({ id }: OrderDetailProps) {
   if (!user || unauthorized) {
     return (
       <main>
-        <h1>Order details</h1>
+        <h1>جزئیات سفارش</h1>
         <p className="empty-state">
-          Please <Link to="/login">log in</Link> to view this order.
+          برای مشاهده این سفارش، <Link to="/login">وارد شوید</Link>.
         </p>
       </main>
     )
@@ -72,8 +110,8 @@ function OrderDetail({ id }: OrderDetailProps) {
   if (loading) {
     return (
       <main>
-        <h1>Order details</h1>
-        <p className="state-message">Loading order...</p>
+        <h1>جزئیات سفارش</h1>
+        <p className="state-message">در حال بارگذاری سفارش...</p>
       </main>
     )
   }
@@ -81,10 +119,10 @@ function OrderDetail({ id }: OrderDetailProps) {
   if (notFound) {
     return (
       <main>
-        <h1>Order details</h1>
-        <p className="empty-state">Order not found.</p>
+        <h1>جزئیات سفارش</h1>
+        <p className="empty-state">سفارش یافت نشد.</p>
         <Link to="/orders" className="back-link">
-          ← Back to orders
+          → بازگشت به سفارش‌ها
         </Link>
       </main>
     )
@@ -93,43 +131,82 @@ function OrderDetail({ id }: OrderDetailProps) {
   if (error || !order) {
     return (
       <main>
-        <h1>Order details</h1>
+        <h1>جزئیات سفارش</h1>
         <p className="alert alert-error" role="alert">
-          {error || 'Could not load order'}
+          {error || 'مشکلی در بارگذاری سفارش پیش آمد'}
         </p>
         <Link to="/orders" className="back-link">
-          ← Back to orders
+          → بازگشت به سفارش‌ها
         </Link>
       </main>
     )
   }
 
+  const canPay = order.payment_status !== 'paid' && order.status !== 'cancelled' && order.status !== 'delivered'
+  const canCancel = order.payment_status !== 'paid' && (order.status === 'pending' || order.status === 'processing')
+
   return (
     <main>
       <Link to="/orders" className="back-link">
-        ← Back to orders
+        → بازگشت به سفارش‌ها
       </Link>
+
+      {notice && (
+        <p className="alert alert-error" role="alert">
+          {notice}
+        </p>
+      )}
 
       <div className="order-card">
         <div className="order-card__header">
-          <h1>Order #{order.id}</h1>
-          <span className="status-badge">{order.status}</span>
+          <h1>سفارش #{order.id}</h1>
+          <span className="status-badge">{orderStatusLabel(order.status)}</span>
         </div>
 
         <div className="order-card__meta">
-          <span>Placed: {new Date(order.created_at).toLocaleString()}</span>
-          <span>Payment: {order.payment_status}</span>
-          <span>Shipping: {order.shipping_method}</span>
+          <span>تاریخ ثبت: {formatDateFa(order.created_at)}</span>
+          <span>وضعیت پرداخت: {paymentStatusLabel(order.payment_status)}</span>
+          <span>روش ارسال: {shippingMethodLabel(order.shipping_method)}</span>
         </div>
+
+        {(canPay || canCancel) && (
+          <div className="order-card__meta" style={{ marginTop: -8 }}>
+            {canPay && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={handlePay} disabled={paying}>
+                {paying
+                  ? 'در حال انتقال...'
+                  : order.payment_status === 'failed'
+                    ? 'تلاش مجدد برای پرداخت'
+                    : 'پرداخت'}
+              </button>
+            )}
+            {canCancel && (
+              <button type="button" className="btn btn-danger btn-sm" onClick={handleCancel} disabled={cancelling}>
+                {cancelling ? 'در حال لغو...' : 'لغو سفارش'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {payError && (
+          <p className="alert alert-error" role="alert">
+            {payError}
+          </p>
+        )}
+        {cancelError && (
+          <p className="alert alert-error" role="alert">
+            {cancelError}
+          </p>
+        )}
 
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Product</th>
-                <th>Unit price</th>
-                <th>Quantity</th>
-                <th>Subtotal</th>
+                <th>محصول</th>
+                <th>قیمت واحد</th>
+                <th>تعداد</th>
+                <th>جمع جزء</th>
               </tr>
             </thead>
             <tbody>
@@ -142,9 +219,9 @@ function OrderDetail({ id }: OrderDetailProps) {
                       item.product_name
                     )}
                   </td>
-                  <td className="price">{item.unit_price}</td>
+                  <td className="price">{formatToman(item.unit_price)}</td>
                   <td>{item.quantity}</td>
-                  <td className="price">{item.subtotal}</td>
+                  <td className="price">{formatToman(item.subtotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -153,22 +230,22 @@ function OrderDetail({ id }: OrderDetailProps) {
 
         <div className="checkout-summary__totals">
           <div className="checkout-summary__row">
-            <span>Items subtotal</span>
-            <span className="price">{order.items_subtotal}</span>
+            <span>جمع جزء کالاها</span>
+            <span className="price">{formatToman(order.items_subtotal)}</span>
           </div>
           <div className="checkout-summary__row">
-            <span>Shipping fee</span>
-            <span className="price">{order.shipping_fee}</span>
+            <span>هزینه ارسال</span>
+            <span className="price">{formatToman(order.shipping_fee)}</span>
           </div>
           <div className="checkout-summary__row checkout-summary__row--total">
-            <span>Total</span>
-            <span className="price">{order.total}</span>
+            <span>جمع کل</span>
+            <span className="price">{formatToman(order.total)}</span>
           </div>
         </div>
 
         {(order.recipient_name || order.address_line1) && (
           <div className="order-card__delivery">
-            <h2>Delivery details</h2>
+            <h2>اطلاعات ارسال</h2>
             {order.recipient_name && <p>{order.recipient_name}</p>}
             {order.phone && <p>{order.phone}</p>}
             {order.address_line1 && <p>{order.address_line1}</p>}
@@ -176,7 +253,7 @@ function OrderDetail({ id }: OrderDetailProps) {
             {(order.city || order.postal_code) && (
               <p>
                 {order.city}
-                {order.city && order.postal_code ? ', ' : ''}
+                {order.city && order.postal_code ? '، ' : ''}
                 {order.postal_code}
               </p>
             )}
@@ -195,8 +272,8 @@ export default function OrderDetailPage() {
   if (!id || !Number.isFinite(orderId) || orderId <= 0) {
     return (
       <main>
-        <p>Invalid order</p>
-        <Link to="/orders">Back to orders</Link>
+        <p>سفارش نامعتبر</p>
+        <Link to="/orders">بازگشت به سفارش‌ها</Link>
       </main>
     )
   }

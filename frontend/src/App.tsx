@@ -14,6 +14,7 @@ import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import OrdersPage from './pages/OrdersPage'
+import PaymentResultPage from './pages/PaymentResultPage'
 import ProductPage from './pages/ProductPage'
 import RegisterPage from './pages/RegisterPage'
 
@@ -32,6 +33,7 @@ function App() {
             <Route path="/checkout" element={<CheckoutPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
+            <Route path="/payment/result" element={<PaymentResultPage />} />
             <Route
               path="/admin/products"
               element={
