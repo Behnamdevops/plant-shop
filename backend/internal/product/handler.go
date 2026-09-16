@@ -7,17 +7,46 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/jackc/pgx/v5"
 )
 
-type Handler struct {
-	repository *Repository
+// authenticator is satisfied by auth.Handler. Using an interface keeps the
+// product package decoupled from auth's concrete type while still reusing
+// its session-cookie validation and admin-role enforcement (mirrors the
+// pattern used by the cart and order packages).
+type authenticator interface {
+	Authenticate(r *http.Request) (int64, error)
+	RequireAdmin(r *http.Request) (int64, error)
 }
 
-func NewHandler(repository *Repository) *Handler {
+type Handler struct {
+	repository *Repository
+	auth       authenticator
+}
+
+func NewHandler(repository *Repository, authHandler *auth.Handler) *Handler {
 	return &Handler{
 		repository: repository,
+		auth:       authHandler,
 	}
+}
+
+// requireAdmin enforces admin-only access and writes the appropriate error
+// response (401 for no/invalid session, 403 for an authenticated non-admin).
+// The role is always determined server-side from the authenticated user
+// stored in the database, never trusted from the request itself.
+func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	_, err := h.auth.RequireAdmin(r)
+	if err != nil {
+		if errors.Is(err, auth.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+		} else {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}
+		return false
+	}
+	return true
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +61,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
 	var input CreateProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -85,7 +118,65 @@ func (h *Handler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(p)
 }
 
+func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	p, err := h.repository.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "product not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(p)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	err = h.repository.Delete(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			http.Error(w, "product not found", http.StatusNotFound)
+		case errors.Is(err, ErrProductReferenced):
+			http.Error(w, "product cannot be deleted because it is referenced by existing orders", http.StatusConflict)
+		default:
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
