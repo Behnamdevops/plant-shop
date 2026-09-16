@@ -16,38 +16,70 @@ export default function HomePage() {
   }, [])
 
   if (loading) {
-    return <p>Loading products...</p>
+    return (
+      <main>
+        <p className="state-message">Loading products...</p>
+      </main>
+    )
   }
 
   if (error) {
-    return <p>{error}</p>
+    return (
+      <main>
+        <p className="alert alert-error" role="alert">
+          {error}
+        </p>
+      </main>
+    )
   }
 
   return (
     <main>
-      <h1>Plant Shop</h1>
+      <div className="page-header">
+        <h1>Plant Shop</h1>
+        <p className="page-subtitle">Fresh, healthy plants delivered to your door.</p>
+      </div>
 
-      {products.map((product) => (
-        <article key={product.id}>
-          <h2>
-            <Link to={`/products/${product.slug}`}>
-              {product.name}
-            </Link>
-          </h2>
+      {products.length === 0 ? (
+        <p className="empty-state">No products available right now.</p>
+      ) : (
+        <div className="product-grid">
+          {products.map((product) => (
+            <article key={product.id} className="card product-card">
+              <div className="product-card__media">
+                {product.image_url ? (
+                  <img src={product.image_url} alt={product.name} />
+                ) : (
+                  <span className="product-card__media-placeholder" aria-hidden="true">
+                    🌱
+                  </span>
+                )}
+              </div>
 
-          {product.image_url && (
-            <img
-              src={product.image_url}
-              alt={product.name}
-              width="200"
-            />
-          )}
+              <div className="product-card__body">
+                <h2>
+                  <Link to={`/products/${product.slug}`}>{product.name}</Link>
+                </h2>
 
-          <p>{product.description}</p>
-          <p>Price: {product.price}</p>
-          <p>Stock: {product.stock}</p>
-        </article>
-      ))}
+                <p className="product-card__desc">{product.description}</p>
+
+                <div className="product-card__footer">
+                  <span className="price">{product.price}</span>
+                  {product.stock > 0 ? (
+                    <span className="badge badge-in-stock">In stock</span>
+                  ) : (
+                    <span className="badge badge-out-of-stock">Out of stock</span>
+                  )}
+                </div>
+
+                <Link to={`/products/${product.slug}`} className="btn btn-secondary btn-block">
+                  View details
+                </Link>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </main>
   )
 }

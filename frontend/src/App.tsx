@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import './App.css'
 import Header from './components/Header'
 import { AuthProvider } from './context/AuthProvider'
 import CartPage from './pages/CartPage'
@@ -14,15 +15,17 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <Header />
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/products/:slug" element={<ProductPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/cart" element={<CartPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/orders/:id" element={<OrderDetailPage />} />
-        </Routes>
+        <div className="page">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/products/:slug" element={<ProductPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/cart" element={<CartPage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/orders/:id" element={<OrderDetailPage />} />
+          </Routes>
+        </div>
       </AuthProvider>
     </BrowserRouter>
   )

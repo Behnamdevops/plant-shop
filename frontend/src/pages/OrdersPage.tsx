@@ -52,7 +52,7 @@ export default function OrdersPage() {
     return (
       <main>
         <h1>Your orders</h1>
-        <p>Loading orders...</p>
+        <p className="state-message">Loading orders...</p>
       </main>
     )
   }
@@ -61,7 +61,7 @@ export default function OrdersPage() {
     return (
       <main>
         <h1>Your orders</h1>
-        <p>
+        <p className="empty-state">
           Please <Link to="/login">log in</Link> to view your orders.
         </p>
       </main>
@@ -72,7 +72,7 @@ export default function OrdersPage() {
     return (
       <main>
         <h1>Your orders</h1>
-        <p>Loading orders...</p>
+        <p className="state-message">Loading orders...</p>
       </main>
     )
   }
@@ -81,8 +81,10 @@ export default function OrdersPage() {
     return (
       <main>
         <h1>Your orders</h1>
-        <p role="alert">{error}</p>
-        <button type="button" onClick={reload}>
+        <p className="alert alert-error" role="alert">
+          {error}
+        </p>
+        <button type="button" className="btn btn-secondary" onClick={reload}>
           Retry
         </button>
       </main>
@@ -93,8 +95,9 @@ export default function OrdersPage() {
     return (
       <main>
         <h1>Your orders</h1>
-        <p>You have no orders yet.</p>
-        <Link to="/">Browse products</Link>
+        <p className="empty-state">
+          You have no orders yet. <Link to="/">Browse products</Link>
+        </p>
       </main>
     )
   }
@@ -103,28 +106,32 @@ export default function OrdersPage() {
     <main>
       <h1>Your orders</h1>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Order</th>
-            <th>Status</th>
-            <th>Total</th>
-            <th>Placed</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((order) => (
-            <tr key={order.id}>
-              <td>
-                <Link to={`/orders/${order.id}`}>#{order.id}</Link>
-              </td>
-              <td>{order.status}</td>
-              <td>{order.total}</td>
-              <td>{new Date(order.created_at).toLocaleString()}</td>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Status</th>
+              <th>Total</th>
+              <th>Placed</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {orders.map((order) => (
+              <tr key={order.id}>
+                <td>
+                  <Link to={`/orders/${order.id}`}>#{order.id}</Link>
+                </td>
+                <td>
+                  <span className="status-badge">{order.status}</span>
+                </td>
+                <td className="price">{order.total}</td>
+                <td>{new Date(order.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </main>
   )
 }

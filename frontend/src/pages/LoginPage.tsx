@@ -35,43 +35,49 @@ export default function LoginPage() {
 
   return (
     <main>
-      <h1>Log in</h1>
+      <div className="form-card">
+        <h1>Log in</h1>
 
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="login-email">Email</label>
-          <input
-            id="login-email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-          />
-        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="form-field">
+            <label htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
 
-        <div>
-          <label htmlFor="login-password">Password</label>
-          <input
-            id="login-password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </div>
+          <div className="form-field">
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
 
-        {error && <p role="alert">{error}</p>}
+          {error && (
+            <p className="alert alert-error" role="alert">
+              {error}
+            </p>
+          )}
 
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Logging in...' : 'Log in'}
-        </button>
-      </form>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+            {submitting ? 'Logging in...' : 'Log in'}
+          </button>
+        </form>
 
-      <p>
-        No account? <Link to="/register">Register</Link>
-      </p>
+        <p className="form-footer">
+          No account? <Link to="/register">Register</Link>
+        </p>
+      </div>
     </main>
   )
 }

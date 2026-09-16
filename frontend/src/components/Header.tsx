@@ -13,6 +13,9 @@ export default function Header() {
   return (
     <header className="site-header">
       <Link to="/" className="site-header__brand">
+        <span className="site-header__brand-icon" aria-hidden="true">
+          🌿
+        </span>
         Plant Shop
       </Link>
 
@@ -22,7 +25,7 @@ export default function Header() {
           <>
             <Link to="/orders">Orders</Link>
             <span className="site-header__user">Hi, {user.name}</span>
-            <button type="button" onClick={handleLogout}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleLogout}>
               Log out
             </button>
           </>
