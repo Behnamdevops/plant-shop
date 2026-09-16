@@ -125,27 +125,12 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session_token")
+	userID, err := h.Authenticate(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	tokenHash := sha256Hash(cookie.Value)
-	session, err := h.repository.FindSessionByTokenHash(r.Context(), tokenHash)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if time.Now().After(session.ExpiresAt) {
-		h.repository.DeleteSessionByID(r.Context(), session.ID)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	user, err := h.repository.FindUserByID(r.Context(), session.UserID)
+	user, err := h.repository.FindUserByID(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -156,6 +141,26 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
+}
+
+// Authenticate validates the request's session cookie and returns the
+// authenticated user's ID. Other domains (e.g. cart) reuse this to enforce
+// authentication without duplicating session/cookie logic.
+func (h *Handler) Authenticate(r *http.Request) (int64, error) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		return 0, ErrUnauthenticated
+	}
+	tokenHash := sha256Hash(cookie.Value)
+	session, err := h.repository.FindSessionByTokenHash(r.Context(), tokenHash)
+	if err != nil {
+		return 0, ErrUnauthenticated
+	}
+	if time.Now().After(session.ExpiresAt) {
+		h.repository.DeleteSessionByID(r.Context(), session.ID)
+		return 0, ErrUnauthenticated
+	}
+	return session.UserID, nil
 }
 func generateSessionToken() (string, error) {
 	bytes := make([]byte, 32)

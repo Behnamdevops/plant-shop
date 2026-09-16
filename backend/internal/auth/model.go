@@ -36,4 +36,5 @@ type LoginInput struct {
 var (
 	ErrDuplicateEmail     = errors.New("duplicate email")
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUnauthenticated    = errors.New("unauthenticated")
 )

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
+	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -34,6 +35,9 @@ func main() {
 	authRepository := auth.NewRepository(db)
 	authHandler := auth.NewHandler(authRepository)
 
+	cartRepository := cart.NewRepository(db)
+	cartHandler := cart.NewHandler(cartRepository, authHandler)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +58,11 @@ func main() {
 	mux.HandleFunc("GET /api/v1/products/{slug}", productHandler.GetBySlug)
 	mux.HandleFunc("POST /api/v1/admin/products", productHandler.Create)
 	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
+
+	mux.HandleFunc("GET /api/v1/cart", cartHandler.GetCart)
+	mux.HandleFunc("POST /api/v1/cart/items", cartHandler.AddItem)
+	mux.HandleFunc("PUT /api/v1/cart/items/{id}", cartHandler.UpdateItem)
+	mux.HandleFunc("DELETE /api/v1/cart/items/{id}", cartHandler.DeleteItem)
 
 	log.Println("server running on :8080")
 
