@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { deleteCartItem, getCart, updateCartItem } from '../api/cart'
-import { createOrder } from '../api/orders'
 import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
 import { useAuth } from '../hooks/useAuth'
@@ -15,9 +14,6 @@ export default function CartPage() {
   const [unauthorized, setUnauthorized] = useState(false)
   const [pendingItemId, setPendingItemId] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [checkingOut, setCheckingOut] = useState(false)
-  const [checkoutError, setCheckoutError] = useState('')
-  const [checkoutMessage, setCheckoutMessage] = useState('')
 
   const reload = () => {
     setLoading(true)
@@ -95,33 +91,8 @@ export default function CartPage() {
     }
   }
 
-  const handleCheckout = async () => {
-    setCheckoutError('')
-    setCheckoutMessage('')
-    setCheckingOut(true)
-
-    try {
-      const order = await createOrder()
-      setCheckoutMessage('Order placed successfully')
-      setCart(null)
-      if (order && typeof order.id === 'number') {
-        navigate(`/orders/${order.id}`)
-      } else {
-        navigate('/orders')
-      }
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setUnauthorized(true)
-      } else if (err instanceof ApiError && err.status === 400) {
-        setCheckoutError('Your cart is empty.')
-      } else if (err instanceof ApiError && err.status === 409) {
-        setCheckoutError('One or more items no longer have enough stock.')
-      } else {
-        setCheckoutError(err instanceof Error ? err.message : 'Could not place order')
-      }
-    } finally {
-      setCheckingOut(false)
-    }
+  const handleCheckout = () => {
+    navigate('/checkout')
   }
 
   if (authLoading || (!user && loading)) {
@@ -256,22 +227,11 @@ export default function CartPage() {
         </span>
 
         {cart.items.length > 0 && (
-          <button type="button" className="btn btn-primary" onClick={handleCheckout} disabled={checkingOut}>
-            {checkingOut ? 'Placing order...' : 'Checkout'}
+          <button type="button" className="btn btn-primary" onClick={handleCheckout}>
+            Checkout
           </button>
         )}
       </div>
-
-      {checkoutMessage && (
-        <p className="alert alert-success" role="status">
-          {checkoutMessage}
-        </p>
-      )}
-      {checkoutError && (
-        <p className="alert alert-error" role="alert">
-          {checkoutError}
-        </p>
-      )}
     </main>
   )
 }

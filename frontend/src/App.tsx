@@ -9,6 +9,7 @@ import AdminProductCreatePage from './pages/admin/AdminProductCreatePage'
 import AdminProductEditPage from './pages/admin/AdminProductEditPage'
 import AdminProductsPage from './pages/admin/AdminProductsPage'
 import CartPage from './pages/CartPage'
+import CheckoutPage from './pages/CheckoutPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import OrderDetailPage from './pages/OrderDetailPage'
@@ -28,6 +29,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/cart" element={<CartPage />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
             <Route

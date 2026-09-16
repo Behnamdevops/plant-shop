@@ -139,7 +139,7 @@ func (e *testHandlerEnv) addToCart(t *testing.T, cookie *http.Cookie, productID 
 
 func TestHandlerCreateUnauthenticated(t *testing.T) {
 	env := newTestHandlerEnv(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
+	req := checkoutRequest(nil)
 	w := httptest.NewRecorder()
 	env.handler.Create(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -172,8 +172,7 @@ func TestHandlerCreateEmptyCart(t *testing.T) {
 	env := newTestHandlerEnv(t)
 	cookie := env.registerAndLogin(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	req.AddCookie(cookie)
+	req := checkoutRequest(cookie)
 	w := httptest.NewRecorder()
 	env.handler.Create(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -187,8 +186,7 @@ func TestHandlerCreateSuccess(t *testing.T) {
 	p := env.createProduct(t, 10)
 	env.addToCart(t, cookie, p.ID, 3)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	req.AddCookie(cookie)
+	req := checkoutRequest(cookie)
 	w := httptest.NewRecorder()
 	env.handler.Create(w, req)
 	if w.Code != http.StatusCreated {
@@ -202,9 +200,28 @@ func TestHandlerCreateSuccess(t *testing.T) {
 	if o.Status != StatusPending {
 		t.Errorf("expected status %q, got %q", StatusPending, o.Status)
 	}
-	wantTotal := p.Price * 3
+	wantSubtotal := p.Price * 3
+	wantTotal := wantSubtotal + ShippingFeeStandard
+	if o.ItemsSubtotal != wantSubtotal {
+		t.Errorf("expected items_subtotal %d, got %d", wantSubtotal, o.ItemsSubtotal)
+	}
+	if o.ShippingFee != ShippingFeeStandard {
+		t.Errorf("expected shipping_fee %d, got %d", ShippingFeeStandard, o.ShippingFee)
+	}
 	if o.Total != wantTotal {
 		t.Errorf("expected total %d, got %d", wantTotal, o.Total)
+	}
+	if o.PaymentStatus != PaymentStatusPending {
+		t.Errorf("expected payment_status %q, got %q", PaymentStatusPending, o.PaymentStatus)
+	}
+	if o.PaymentMethod != PaymentMethodManual {
+		t.Errorf("expected payment_method %q, got %q", PaymentMethodManual, o.PaymentMethod)
+	}
+	if o.RecipientName == nil || *o.RecipientName != "Test Recipient" {
+		t.Errorf("expected recipient_name snapshot to be stored, got %v", o.RecipientName)
+	}
+	if o.ShippingMethod != ShippingMethodStandard {
+		t.Errorf("expected shipping_method %q, got %q", ShippingMethodStandard, o.ShippingMethod)
 	}
 
 	// Cart should now be empty.
@@ -232,8 +249,7 @@ func TestHandlerCreateInsufficientStock(t *testing.T) {
 		t.Fatalf("failed to force low stock: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	req.AddCookie(cookie)
+	req := checkoutRequest(cookie)
 	w := httptest.NewRecorder()
 	env.handler.Create(w, req)
 	if w.Code != http.StatusConflict {
@@ -269,8 +285,7 @@ func TestHandlerListOnlyCurrentUser(t *testing.T) {
 	p := env.createProduct(t, 10)
 
 	env.addToCart(t, cookieA, p.ID, 1)
-	createReqA := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	createReqA.AddCookie(cookieA)
+	createReqA := checkoutRequest(cookieA)
 	createWA := httptest.NewRecorder()
 	env.handler.Create(createWA, createReqA)
 	if createWA.Code != http.StatusCreated {
@@ -308,8 +323,7 @@ func TestHandlerGetByIDCrossUserReturns404(t *testing.T) {
 	p := env.createProduct(t, 10)
 
 	env.addToCart(t, owner, p.ID, 1)
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	createReq.AddCookie(owner)
+	createReq := checkoutRequest(owner)
 	createW := httptest.NewRecorder()
 	env.handler.Create(createW, createReq)
 	if createW.Code != http.StatusCreated {
@@ -447,12 +461,39 @@ func TestHandlerAdminUpdateStatusNonAdminForbidden(t *testing.T) {
 
 // createOrderForUser places an order for cookie's user containing one unit
 // of a freshly created product, and returns the created order.
+// validCheckoutBody returns a JSON-encoded checkout request body that
+// passes server-side validation, for tests that only care about auth/cart/
+// stock/status behavior and not about delivery-field validation itself.
+func validCheckoutBody() []byte {
+	body, _ := json.Marshal(map[string]any{
+		"recipient_name":  "Test Recipient",
+		"phone":           "+1 555 0100",
+		"address_line1":   "123 Greenhouse Ave",
+		"address_line2":   "",
+		"city":            "Plantville",
+		"postal_code":     "12345",
+		"country":         "Testland",
+		"shipping_method": ShippingMethodStandard,
+	})
+	return body
+}
+
+// checkoutRequest builds a POST /api/v1/orders request carrying a valid
+// checkout body, mirroring how a real client would submit the checkout
+// form.
+func checkoutRequest(cookie *http.Cookie) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(validCheckoutBody()))
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	return req
+}
+
 func (e *testHandlerEnv) createOrderForUser(t *testing.T, cookie *http.Cookie) Order {
 	t.Helper()
 	p := e.createProduct(t, 10)
 	e.addToCart(t, cookie, p.ID, 1)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
-	req.AddCookie(cookie)
+	req := checkoutRequest(cookie)
 	w := httptest.NewRecorder()
 	e.handler.Create(w, req)
 	if w.Code != http.StatusCreated {
@@ -728,5 +769,412 @@ func TestHandlerAdminUpdateStatusCancelledIsTerminal(t *testing.T) {
 	env.handler.AdminUpdateStatus(w2, req2)
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("expected cancelled->processing to be rejected with 409, got %d", w2.Code)
+	}
+}
+
+// ---------- Checkout & Fulfillment V2 ----------
+
+func TestHandlerCreateMissingRequiredDeliveryField(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	cookie := env.registerAndLogin(t)
+	p := env.createProduct(t, 10)
+	env.addToCart(t, cookie, p.ID, 1)
+
+	body, _ := json.Marshal(map[string]any{
+		"recipient_name":  "",
+		"phone":           "+1 555 0100",
+		"address_line1":   "123 Greenhouse Ave",
+		"city":            "Plantville",
+		"postal_code":     "12345",
+		"country":         "Testland",
+		"shipping_method": ShippingMethodStandard,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestHandlerCreateWhitespaceOnlyRequiredFieldRejected(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	cookie := env.registerAndLogin(t)
+	p := env.createProduct(t, 10)
+	env.addToCart(t, cookie, p.ID, 1)
+
+	body, _ := json.Marshal(map[string]any{
+		"recipient_name":  "   ",
+		"phone":           "+1 555 0100",
+		"address_line1":   "123 Greenhouse Ave",
+		"city":            "Plantville",
+		"postal_code":     "12345",
+		"country":         "Testland",
+		"shipping_method": ShippingMethodStandard,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestHandlerCreateInvalidShippingMethod(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	cookie := env.registerAndLogin(t)
+	p := env.createProduct(t, 10)
+	env.addToCart(t, cookie, p.ID, 1)
+
+	body, _ := json.Marshal(map[string]any{
+		"recipient_name":  "Test Recipient",
+		"phone":           "+1 555 0100",
+		"address_line1":   "123 Greenhouse Ave",
+		"city":            "Plantville",
+		"postal_code":     "12345",
+		"country":         "Testland",
+		"shipping_method": "overnight-drone",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestHandlerCreateExpressShippingUsesExpressFee(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	cookie := env.registerAndLogin(t)
+	p := env.createProduct(t, 10)
+	env.addToCart(t, cookie, p.ID, 2)
+
+	body, _ := json.Marshal(map[string]any{
+		"recipient_name":  "Test Recipient",
+		"phone":           "+1 555 0100",
+		"address_line1":   "123 Greenhouse Ave",
+		"address_line2":   "Apt 4",
+		"city":            "Plantville",
+		"postal_code":     "12345",
+		"country":         "Testland",
+		"shipping_method": ShippingMethodExpress,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.Create(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var o Order
+	json.NewDecoder(w.Body).Decode(&o)
+	wantSubtotal := p.Price * 2
+	wantTotal := wantSubtotal + ShippingFeeExpress
+	if o.ShippingFee != ShippingFeeExpress {
+		t.Errorf("expected shipping_fee %d, got %d", ShippingFeeExpress, o.ShippingFee)
+	}
+	if o.ItemsSubtotal != wantSubtotal {
+		t.Errorf("expected items_subtotal %d, got %d", wantSubtotal, o.ItemsSubtotal)
+	}
+	if o.Total != wantTotal {
+		t.Errorf("expected total %d, got %d", wantTotal, o.Total)
+	}
+	if o.AddressLine2 == nil || *o.AddressLine2 != "Apt 4" {
+		t.Errorf("expected address_line2 snapshot %q, got %v", "Apt 4", o.AddressLine2)
+	}
+}
+
+func TestHandlerGetByIDIncludesFulfillmentFields(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	cookie := env.registerAndLogin(t)
+	order := env.createOrderForUser(t, cookie)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+idStr, nil)
+	req.SetPathValue("id", idStr)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.GetByID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	for _, field := range []string{
+		"recipient_name", "phone", "address_line1", "address_line2", "city", "postal_code", "country",
+		"shipping_method", "shipping_fee", "items_subtotal", "payment_status", "payment_method",
+	} {
+		if _, ok := raw[field]; !ok {
+			t.Errorf("expected customer order detail to contain field %q", field)
+		}
+	}
+	// The response must not expose any auth-sensitive data.
+	for _, field := range []string{"password_hash", "user_id", "token_hash", "session_token"} {
+		if _, ok := raw[field]; ok {
+			t.Errorf("order detail response unexpectedly contains sensitive field %q", field)
+		}
+	}
+}
+
+func TestHandlerAdminGetByIDIncludesFulfillmentFields(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/"+idStr, nil)
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	for _, field := range []string{
+		"recipient_name", "phone", "address_line1", "city", "postal_code", "country",
+		"shipping_method", "shipping_fee", "items_subtotal", "payment_status", "payment_method", "customer",
+	} {
+		if _, ok := raw[field]; !ok {
+			t.Errorf("expected admin order detail to contain field %q", field)
+		}
+	}
+	for _, field := range []string{"password_hash", "token_hash", "session_token"} {
+		if _, ok := raw[field]; ok {
+			t.Errorf("admin order detail response unexpectedly contains sensitive field %q", field)
+		}
+	}
+}
+
+// ---------- Cancellation stock restoration ----------
+
+func TestHandlerCancelPendingRestoresStock(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	p := env.createProduct(t, 10)
+	env.addToCart(t, buyer, p.ID, 3)
+	createReq := checkoutRequest(buyer)
+	createW := httptest.NewRecorder()
+	env.handler.Create(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("setup order failed: got %d, body=%s", createW.Code, createW.Body.String())
+	}
+	var order Order
+	json.NewDecoder(createW.Body).Decode(&order)
+
+	// Stock was decremented by checkout.
+	var stockAfterCheckout int
+	env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, p.ID).Scan(&stockAfterCheckout)
+	if stockAfterCheckout != 7 {
+		t.Fatalf("expected stock 7 after checkout, got %d", stockAfterCheckout)
+	}
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cancel failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	var stockAfterCancel int
+	env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, p.ID).Scan(&stockAfterCancel)
+	if stockAfterCancel != 10 {
+		t.Errorf("expected stock restored to 10 after cancellation, got %d", stockAfterCancel)
+	}
+}
+
+func TestHandlerCancelProcessingRestoresStock(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	p := env.createProduct(t, 10)
+	env.addToCart(t, buyer, p.ID, 4)
+	createReq := checkoutRequest(buyer)
+	createW := httptest.NewRecorder()
+	env.handler.Create(createW, createReq)
+	var order Order
+	json.NewDecoder(createW.Body).Decode(&order)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	// pending -> processing
+	body, _ := json.Marshal(map[string]any{"status": StatusProcessing})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("transition to processing failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	// processing -> cancelled
+	body2, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req2 := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body2))
+	req2.SetPathValue("id", idStr)
+	req2.AddCookie(admin)
+	w2 := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("cancel from processing failed: got %d, body=%s", w2.Code, w2.Body.String())
+	}
+
+	var stock int
+	env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, p.ID).Scan(&stock)
+	if stock != 10 {
+		t.Errorf("expected stock restored to 10, got %d", stock)
+	}
+}
+
+func TestHandlerCancelTwiceDoesNotDoubleRestoreStock(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	p := env.createProduct(t, 10)
+	env.addToCart(t, buyer, p.ID, 2)
+	createReq := checkoutRequest(buyer)
+	createW := httptest.NewRecorder()
+	env.handler.Create(createW, createReq)
+	var order Order
+	json.NewDecoder(createW.Body).Decode(&order)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first cancel failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	// Repeated cancellation attempt: cancelled is terminal, must be
+	// rejected and must NOT restore stock a second time.
+	req2 := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req2.SetPathValue("id", idStr)
+	req2.AddCookie(admin)
+	w2 := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Fatalf("expected repeated cancellation to be rejected with 409, got %d", w2.Code)
+	}
+
+	var stock int
+	env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, p.ID).Scan(&stock)
+	if stock != 10 {
+		t.Errorf("expected stock restored exactly once (to 10), got %d", stock)
+	}
+}
+
+func TestHandlerCancelAfterDeliveredRejectedNoStockChange(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	p := env.createProduct(t, 10)
+	env.addToCart(t, buyer, p.ID, 1)
+	createReq := checkoutRequest(buyer)
+	createW := httptest.NewRecorder()
+	env.handler.Create(createW, createReq)
+	var order Order
+	json.NewDecoder(createW.Body).Decode(&order)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	for _, status := range []string{StatusProcessing, StatusShipped, StatusDelivered} {
+		body, _ := json.Marshal(map[string]any{"status": status})
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+		req.SetPathValue("id", idStr)
+		req.AddCookie(admin)
+		w := httptest.NewRecorder()
+		env.handler.AdminUpdateStatus(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("transition to %q failed: got %d, body=%s", status, w.Code, w.Body.String())
+		}
+	}
+
+	// delivered -> cancelled must be rejected, and stock must remain
+	// decremented (delivered orders never restore stock).
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected delivered->cancelled rejected with 409, got %d", w.Code)
+	}
+
+	var stock int
+	env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, p.ID).Scan(&stock)
+	if stock != 9 {
+		t.Errorf("expected stock to remain decremented at 9 (delivered order, no restoration), got %d", stock)
+	}
+}
+
+func TestHandlerCancelMultiItemOrderRestoresAllProducts(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	pA := env.createProduct(t, 10)
+	pB := env.createProduct(t, 20)
+	pC := env.createProduct(t, 5)
+	env.addToCart(t, buyer, pA.ID, 3)
+	env.addToCart(t, buyer, pB.ID, 7)
+	env.addToCart(t, buyer, pC.ID, 2)
+
+	createReq := checkoutRequest(buyer)
+	createW := httptest.NewRecorder()
+	env.handler.Create(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("setup order failed: got %d, body=%s", createW.Code, createW.Body.String())
+	}
+	var order Order
+	json.NewDecoder(createW.Body).Decode(&order)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cancel failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	for _, tc := range []struct {
+		id   int64
+		want int
+	}{
+		{pA.ID, 10},
+		{pB.ID, 20},
+		{pC.ID, 5},
+	} {
+		var stock int
+		env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, tc.id).Scan(&stock)
+		if stock != tc.want {
+			t.Errorf("product %d: expected stock restored to %d, got %d", tc.id, tc.want, stock)
+		}
 	}
 }

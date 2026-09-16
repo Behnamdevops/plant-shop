@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,21 @@ func (e *testEnv) createProduct(t *testing.T, stock int) product.Product {
 	return p
 }
 
+// validCheckoutInput returns a CheckoutInput that passes Validate(), for
+// tests that only care about the cart/stock/status behavior of
+// CreateFromCart and not about delivery/shipping field validation itself.
+func validCheckoutInput() CheckoutInput {
+	return CheckoutInput{
+		RecipientName:  "Test Recipient",
+		Phone:          "+1 555 0100",
+		AddressLine1:   "123 Greenhouse Ave",
+		City:           "Plantville",
+		PostalCode:     "12345",
+		Country:        "Testland",
+		ShippingMethod: ShippingMethodStandard,
+	}
+}
+
 func (e *testEnv) getStock(t *testing.T, productID int64) int {
 	t.Helper()
 	var stock int
@@ -89,7 +105,7 @@ func TestRepositoryCreateFromCartEmptyCart(t *testing.T) {
 	env := newTestEnv(t)
 	userID := env.createUser(t)
 
-	_, err := env.orderRepo.CreateFromCart(context.Background(), userID)
+	_, err := env.orderRepo.CreateFromCart(context.Background(), userID, validCheckoutInput())
 	if !errors.Is(err, ErrEmptyCart) {
 		t.Fatalf("expected ErrEmptyCart, got %v", err)
 	}
@@ -108,7 +124,7 @@ func TestRepositoryCreateFromCartSuccess(t *testing.T) {
 		t.Fatalf("AddItem failed: %v", err)
 	}
 
-	o, err := env.orderRepo.CreateFromCart(context.Background(), userID)
+	o, err := env.orderRepo.CreateFromCart(context.Background(), userID, validCheckoutInput())
 	if err != nil {
 		t.Fatalf("CreateFromCart failed: %v", err)
 	}
@@ -118,7 +134,14 @@ func TestRepositoryCreateFromCartSuccess(t *testing.T) {
 	if o.Status != StatusPending {
 		t.Errorf("expected status %q, got %q", StatusPending, o.Status)
 	}
-	wantTotal := p1.Price*2 + p2.Price*3
+	wantSubtotal := p1.Price*2 + p2.Price*3
+	wantTotal := wantSubtotal + ShippingFeeStandard
+	if o.ItemsSubtotal != wantSubtotal {
+		t.Errorf("expected items_subtotal %d, got %d", wantSubtotal, o.ItemsSubtotal)
+	}
+	if o.ShippingFee != ShippingFeeStandard {
+		t.Errorf("expected shipping_fee %d, got %d", ShippingFeeStandard, o.ShippingFee)
+	}
 	if o.Total != wantTotal {
 		t.Errorf("expected total %d, got %d", wantTotal, o.Total)
 	}
@@ -149,7 +172,7 @@ func TestRepositoryCreateFromCartDecrementsStock(t *testing.T) {
 		t.Fatalf("AddItem failed: %v", err)
 	}
 
-	if _, err := env.orderRepo.CreateFromCart(context.Background(), userID); err != nil {
+	if _, err := env.orderRepo.CreateFromCart(context.Background(), userID, validCheckoutInput()); err != nil {
 		t.Fatalf("CreateFromCart failed: %v", err)
 	}
 
@@ -168,7 +191,7 @@ func TestRepositoryCreateFromCartClearsCart(t *testing.T) {
 		t.Fatalf("AddItem failed: %v", err)
 	}
 
-	if _, err := env.orderRepo.CreateFromCart(context.Background(), userID); err != nil {
+	if _, err := env.orderRepo.CreateFromCart(context.Background(), userID, validCheckoutInput()); err != nil {
 		t.Fatalf("CreateFromCart failed: %v", err)
 	}
 
@@ -200,7 +223,7 @@ func TestRepositoryCreateFromCartInsufficientStockRollsBack(t *testing.T) {
 		t.Fatalf("failed to force low stock: %v", err)
 	}
 
-	_, err = env.orderRepo.CreateFromCart(context.Background(), userID)
+	_, err = env.orderRepo.CreateFromCart(context.Background(), userID, validCheckoutInput())
 	if !errors.Is(err, ErrInsufficientStock) {
 		t.Fatalf("expected ErrInsufficientStock, got %v", err)
 	}
@@ -237,7 +260,7 @@ func TestRepositoryListByUserIsolatedPerUser(t *testing.T) {
 	if _, err := env.cartRepo.AddItem(context.Background(), userA, p.ID, 1); err != nil {
 		t.Fatalf("AddItem failed: %v", err)
 	}
-	if _, err := env.orderRepo.CreateFromCart(context.Background(), userA); err != nil {
+	if _, err := env.orderRepo.CreateFromCart(context.Background(), userA, validCheckoutInput()); err != nil {
 		t.Fatalf("CreateFromCart failed: %v", err)
 	}
 
@@ -267,7 +290,7 @@ func TestRepositoryGetByIDForUserCrossUserProtection(t *testing.T) {
 	if _, err := env.cartRepo.AddItem(context.Background(), owner, p.ID, 1); err != nil {
 		t.Fatalf("AddItem failed: %v", err)
 	}
-	o, err := env.orderRepo.CreateFromCart(context.Background(), owner)
+	o, err := env.orderRepo.CreateFromCart(context.Background(), owner, validCheckoutInput())
 	if err != nil {
 		t.Fatalf("CreateFromCart failed: %v", err)
 	}
@@ -285,5 +308,119 @@ func TestRepositoryGetByIDForUserNotFound(t *testing.T) {
 	_, err := env.orderRepo.GetByIDForUser(context.Background(), userID, 999999)
 	if !errors.Is(err, ErrOrderNotFound) {
 		t.Fatalf("expected ErrOrderNotFound, got %v", err)
+	}
+}
+
+func TestRepositoryCreateFromCartStoresDeliverySnapshot(t *testing.T) {
+	env := newTestEnv(t)
+	userID := env.createUser(t)
+	p := env.createProduct(t, 10)
+	if _, err := env.cartRepo.AddItem(context.Background(), userID, p.ID, 1); err != nil {
+		t.Fatalf("AddItem failed: %v", err)
+	}
+
+	input := CheckoutInput{
+		RecipientName:  "Jane Doe",
+		Phone:          "+1 555 0199",
+		AddressLine1:   "42 Fern Street",
+		AddressLine2:   "Unit 7",
+		City:           "Rootford",
+		PostalCode:     "98765",
+		Country:        "Leafland",
+		ShippingMethod: ShippingMethodExpress,
+	}
+
+	o, err := env.orderRepo.CreateFromCart(context.Background(), userID, input)
+	if err != nil {
+		t.Fatalf("CreateFromCart failed: %v", err)
+	}
+
+	check := func(name string, got *string, want string) {
+		if got == nil || *got != want {
+			t.Errorf("expected %s %q, got %v", name, want, got)
+		}
+	}
+	check("recipient_name", o.RecipientName, input.RecipientName)
+	check("phone", o.Phone, input.Phone)
+	check("address_line1", o.AddressLine1, input.AddressLine1)
+	check("address_line2", o.AddressLine2, input.AddressLine2)
+	check("city", o.City, input.City)
+	check("postal_code", o.PostalCode, input.PostalCode)
+	check("country", o.Country, input.Country)
+
+	if o.ShippingMethod != ShippingMethodExpress {
+		t.Errorf("expected shipping_method %q, got %q", ShippingMethodExpress, o.ShippingMethod)
+	}
+	if o.ShippingFee != ShippingFeeExpress {
+		t.Errorf("expected shipping_fee %d, got %d", ShippingFeeExpress, o.ShippingFee)
+	}
+	if o.PaymentStatus != PaymentStatusPending {
+		t.Errorf("expected payment_status %q, got %q", PaymentStatusPending, o.PaymentStatus)
+	}
+	if o.PaymentMethod != PaymentMethodManual {
+		t.Errorf("expected payment_method %q, got %q", PaymentMethodManual, o.PaymentMethod)
+	}
+}
+
+func TestRepositoryCreateFromCartOptionalAddressLine2Absent(t *testing.T) {
+	env := newTestEnv(t)
+	userID := env.createUser(t)
+	p := env.createProduct(t, 10)
+	if _, err := env.cartRepo.AddItem(context.Background(), userID, p.ID, 1); err != nil {
+		t.Fatalf("AddItem failed: %v", err)
+	}
+
+	input := validCheckoutInput()
+	input.AddressLine2 = ""
+
+	o, err := env.orderRepo.CreateFromCart(context.Background(), userID, input)
+	if err != nil {
+		t.Fatalf("CreateFromCart failed: %v", err)
+	}
+	if o.AddressLine2 != nil {
+		t.Errorf("expected address_line2 to be nil when not provided, got %v", *o.AddressLine2)
+	}
+}
+
+func TestCheckoutInputValidateRequiredFields(t *testing.T) {
+	base := validCheckoutInput()
+
+	cases := []struct {
+		name   string
+		mutate func(in *CheckoutInput)
+	}{
+		{"empty recipient_name", func(in *CheckoutInput) { in.RecipientName = "" }},
+		{"whitespace recipient_name", func(in *CheckoutInput) { in.RecipientName = "   " }},
+		{"empty phone", func(in *CheckoutInput) { in.Phone = "" }},
+		{"empty address_line1", func(in *CheckoutInput) { in.AddressLine1 = "" }},
+		{"empty city", func(in *CheckoutInput) { in.City = "" }},
+		{"empty postal_code", func(in *CheckoutInput) { in.PostalCode = "" }},
+		{"empty country", func(in *CheckoutInput) { in.Country = "" }},
+		{"empty shipping_method", func(in *CheckoutInput) { in.ShippingMethod = "" }},
+		{"invalid shipping_method", func(in *CheckoutInput) { in.ShippingMethod = "teleport" }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base
+			tc.mutate(&in)
+			if err := in.Validate(); err == nil {
+				t.Errorf("expected validation error for case %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestCheckoutInputValidateAcceptsValidInput(t *testing.T) {
+	if err := validCheckoutInput().Validate(); err != nil {
+		t.Errorf("expected valid input to pass validation, got %v", err)
+	}
+}
+
+func TestCheckoutInputValidateRejectsFieldTooLong(t *testing.T) {
+	in := validCheckoutInput()
+	in.RecipientName = strings.Repeat("a", maxRecipientNameLen+1)
+	if err := in.Validate(); err == nil {
+		t.Error("expected validation error for overlong recipient_name")
 	}
 }
