@@ -14,7 +14,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type Handler struct{ repository *Repository }
+type Handler struct {
+	repository *Repository
+
+	// SecureCookies controls the Secure attribute on the session cookie.
+	// It defaults to false so local HTTP development keeps working without
+	// extra configuration. main.go sets this to true in production
+	// (APP_ENV=production), where the app is expected to be served over
+	// HTTPS. HttpOnly and SameSite=Lax are always applied regardless.
+	SecureCookies bool
+}
 
 func NewHandler(repository *Repository) *Handler { return &Handler{repository: repository} }
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +69,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "session_token", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: false, Expires: expiresAt})
+	http.SetCookie(w, &http.Cookie{Name: "session_token", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.SecureCookies, Expires: expiresAt})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(user)
@@ -124,7 +133,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   false,
+		Secure:   h.SecureCookies,
 		Expires:  expiresAt,
 	})
 
@@ -151,7 +160,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "session_token", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: false, MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "session_token", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.SecureCookies, MaxAge: -1})
 	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {

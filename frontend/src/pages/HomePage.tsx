@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getProducts } from '../api/products'
 import type { Product } from '../types/product'
+import { storeConfig } from '../config'
 
 export default function HomePage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -36,7 +37,7 @@ export default function HomePage() {
   return (
     <main>
       <div className="page-header">
-        <h1>Plant Shop</h1>
+        <h1>{storeConfig.name}</h1>
         <p className="page-subtitle">Fresh, healthy plants delivered to your door.</p>
       </div>
 

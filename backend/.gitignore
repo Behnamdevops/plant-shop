@@ -1,0 +1,16 @@
+# Build output
+/server
+*.exe
+*.test
+
+# Environment files (never commit secrets; .env.example is tracked)
+.env
+.env.*
+!.env.example
+
+# Local test/debug artifacts
+cookies.txt
+*.local
+
+# Editor/OS
+.DS_Store

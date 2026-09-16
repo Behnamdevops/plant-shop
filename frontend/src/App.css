@@ -255,7 +255,9 @@
 }
 
 .price::before {
-  content: '$';
+  /* Set from src/config.ts (VITE_CURRENCY_SYMBOL) via a CSS custom
+     property on :root in main.tsx; falls back to '$' if unset. */
+  content: var(--currency-symbol, '$');
   opacity: 0.7;
   margin-right: 1px;
 }

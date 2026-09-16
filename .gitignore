@@ -1,0 +1,12 @@
+# Root-level ignores. Per-project ignores also live in backend/.gitignore
+# and frontend/.gitignore.
+
+# Environment files (never commit secrets; *.example files are tracked)
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
