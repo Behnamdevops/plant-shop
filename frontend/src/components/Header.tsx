@@ -21,6 +21,9 @@ export default function Header() {
 
       <nav className="site-header__nav">
         <Link to="/cart">Cart</Link>
+        {/* Admin is a plain utility link, not gated by a role check: the backend
+            has no admin/role concept today, so this is not real authorization. */}
+        <Link to="/admin/products">Admin</Link>
         {loading ? null : user ? (
           <>
             <Link to="/orders">Orders</Link>
