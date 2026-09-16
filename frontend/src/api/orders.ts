@@ -1,5 +1,5 @@
 import type { CheckoutInput } from '../types/checkout'
-import type { AdminOrderDetails, AdminOrderSummary, OrderDetails, OrderSummary } from '../types/order'
+import type { AdminOrderDetails, AdminOrderSummary, OrderDetails, OrderSummary, PaymentAttempt } from '../types/order'
 import { throwApiError } from './errors'
 
 // createOrder submits a checkout request for the authenticated user's
@@ -46,6 +46,23 @@ export async function getOrder(id: number): Promise<OrderDetails> {
   return response.json()
 }
 
+// cancelOrder lets the authenticated customer cancel their own order,
+// provided it belongs to them, its payment has not already succeeded, and
+// its current status still allows cancellation (e.g. not already shipped/
+// delivered/cancelled). Inventory is restored server-side.
+export async function cancelOrder(id: number): Promise<OrderDetails> {
+  const response = await fetch(`/api/v1/orders/${id}/cancel`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    return throwApiError(response)
+  }
+
+  return response.json()
+}
+
 export async function getAdminOrders(): Promise<AdminOrderSummary[]> {
   const response = await fetch('/api/v1/admin/orders', {
     credentials: 'include',
@@ -60,6 +77,20 @@ export async function getAdminOrders(): Promise<AdminOrderSummary[]> {
 
 export async function getAdminOrder(id: number): Promise<AdminOrderDetails> {
   const response = await fetch(`/api/v1/admin/orders/${id}`, {
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    return throwApiError(response)
+  }
+
+  return response.json()
+}
+
+// getAdminOrderPayments returns every ZarinPal payment attempt for order
+// id, newest first, for admin inspection (e.g. showing a ref_id).
+export async function getAdminOrderPayments(id: number): Promise<PaymentAttempt[]> {
+  const response = await fetch(`/api/v1/admin/orders/${id}/payments`, {
     credentials: 'include',
   })
 

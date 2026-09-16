@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError('')
 
     if (!email.trim() || !password) {
-      setError('Email and password are required')
+      setError('ایمیل و رمز عبور الزامی است')
       return
     }
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
       await login({ email: email.trim(), password })
       navigate('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      setError(err instanceof Error ? err.message : 'ورود ناموفق بود')
     } finally {
       setSubmitting(false)
     }
@@ -36,11 +36,11 @@ export default function LoginPage() {
   return (
     <main>
       <div className="form-card">
-        <h1>Log in</h1>
+        <h1>ورود</h1>
 
         <form onSubmit={handleSubmit}>
           <div className="form-field">
-            <label htmlFor="login-email">Email</label>
+            <label htmlFor="login-email">ایمیل</label>
             <input
               id="login-email"
               type="email"
@@ -52,7 +52,7 @@ export default function LoginPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="login-password">Password</label>
+            <label htmlFor="login-password">رمز عبور</label>
             <input
               id="login-password"
               type="password"
@@ -70,12 +70,12 @@ export default function LoginPage() {
           )}
 
           <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
-            {submitting ? 'Logging in...' : 'Log in'}
+            {submitting ? 'در حال ورود...' : 'ورود'}
           </button>
         </form>
 
         <p className="form-footer">
-          No account? <Link to="/register">Register</Link>
+          حساب کاربری ندارید؟ <Link to="/register">ثبت‌نام کنید</Link>
         </p>
       </div>
     </main>

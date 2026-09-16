@@ -30,9 +30,9 @@ export default function AdminProductEditPage() {
       .catch((err) => {
         if (ignore) return
         if (err instanceof ApiError && err.status === 404) {
-          setError('Product not found')
+          setError('محصول یافت نشد')
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load product')
+          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری محصول پیش آمد')
         }
       })
       .finally(() => {
@@ -53,10 +53,10 @@ export default function AdminProductEditPage() {
     return (
       <main>
         <p className="alert alert-error" role="alert">
-          Invalid product id
+          شناسه محصول نامعتبر است
         </p>
         <Link to="/admin/products" className="back-link">
-          ← Back to admin products
+          → بازگشت به محصولات
         </Link>
       </main>
     )
@@ -65,7 +65,7 @@ export default function AdminProductEditPage() {
   if (loading) {
     return (
       <main>
-        <p className="state-message">Loading product...</p>
+        <p className="state-message">در حال بارگذاری محصول...</p>
       </main>
     )
   }
@@ -74,10 +74,10 @@ export default function AdminProductEditPage() {
     return (
       <main>
         <p className="alert alert-error" role="alert">
-          {error || 'Product not found'}
+          {error || 'محصول یافت نشد'}
         </p>
         <Link to="/admin/products" className="back-link">
-          ← Back to admin products
+          → بازگشت به محصولات
         </Link>
       </main>
     )
@@ -86,8 +86,8 @@ export default function AdminProductEditPage() {
   return (
     <main>
       <div className="form-card">
-        <h1>Edit product</h1>
-        <ProductForm initial={product} submitLabel="Save changes" onSubmit={handleSubmit} />
+        <h1>ویرایش محصول</h1>
+        <ProductForm initial={product} submitLabel="ذخیره تغییرات" onSubmit={handleSubmit} />
       </div>
     </main>
   )

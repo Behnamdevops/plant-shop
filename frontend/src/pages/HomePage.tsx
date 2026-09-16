@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { getProducts } from '../api/products'
 import type { Product } from '../types/product'
 import { storeConfig } from '../config'
+import { formatToman } from '../lib/format'
 
 export default function HomePage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -12,14 +13,14 @@ export default function HomePage() {
   useEffect(() => {
     getProducts()
       .then(setProducts)
-      .catch(() => setError('Could not load products'))
+      .catch(() => setError('مشکلی در بارگذاری محصولات پیش آمد'))
       .finally(() => setLoading(false))
   }, [])
 
   if (loading) {
     return (
       <main>
-        <p className="state-message">Loading products...</p>
+        <p className="state-message">در حال بارگذاری محصولات...</p>
       </main>
     )
   }
@@ -38,11 +39,11 @@ export default function HomePage() {
     <main>
       <div className="page-header">
         <h1>{storeConfig.name}</h1>
-        <p className="page-subtitle">Fresh, healthy plants delivered to your door.</p>
+        <p className="page-subtitle">گیاهان سالم و تازه، تا در خانه شما.</p>
       </div>
 
       {products.length === 0 ? (
-        <p className="empty-state">No products available right now.</p>
+        <p className="empty-state">در حال حاضر محصولی موجود نیست.</p>
       ) : (
         <div className="product-grid">
           {products.map((product) => (
@@ -65,16 +66,16 @@ export default function HomePage() {
                 <p className="product-card__desc">{product.description}</p>
 
                 <div className="product-card__footer">
-                  <span className="price">{product.price}</span>
+                  <span className="price">{formatToman(product.price)}</span>
                   {product.stock > 0 ? (
-                    <span className="badge badge-in-stock">In stock</span>
+                    <span className="badge badge-in-stock">موجود</span>
                   ) : (
-                    <span className="badge badge-out-of-stock">Out of stock</span>
+                    <span className="badge badge-out-of-stock">ناموجود</span>
                   )}
                 </div>
 
                 <Link to={`/products/${product.slug}`} className="btn btn-secondary btn-block">
-                  View details
+                  مشاهده جزئیات
                 </Link>
               </div>
             </article>

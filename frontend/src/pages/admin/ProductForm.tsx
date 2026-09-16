@@ -29,15 +29,15 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
     const stockNum = Number(stock)
 
     if (!trimmedName || !trimmedSlug) {
-      setError('Name and slug are required')
+      setError('نام و Slug الزامی است')
       return
     }
     if (!Number.isFinite(priceNum) || priceNum < 0) {
-      setError('Price must be a number >= 0')
+      setError('قیمت باید عددی بزرگتر یا مساوی صفر باشد')
       return
     }
     if (!Number.isInteger(stockNum) || stockNum < 0) {
-      setError('Stock must be a whole number >= 0')
+      setError('موجودی باید عددی صحیح و بزرگتر یا مساوی صفر باشد')
       return
     }
 
@@ -53,7 +53,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
         image_url: imageUrl.trim() || null,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save product')
+      setError(err instanceof Error ? err.message : 'مشکلی در ذخیره محصول پیش آمد')
     } finally {
       setSubmitting(false)
     }
@@ -62,7 +62,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
   return (
     <form onSubmit={handleSubmit}>
       <div className="form-field">
-        <label htmlFor="product-name">Name</label>
+        <label htmlFor="product-name">نام</label>
         <input
           id="product-name"
           type="text"
@@ -84,7 +84,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
       </div>
 
       <div className="form-field">
-        <label htmlFor="product-description">Description</label>
+        <label htmlFor="product-description">توضیحات</label>
         <input
           id="product-description"
           type="text"
@@ -94,7 +94,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
       </div>
 
       <div className="form-field">
-        <label htmlFor="product-price">Price (minor units)</label>
+        <label htmlFor="product-price">قیمت (ریال)</label>
         <input
           id="product-price"
           type="number"
@@ -106,7 +106,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
       </div>
 
       <div className="form-field">
-        <label htmlFor="product-stock">Stock</label>
+        <label htmlFor="product-stock">موجودی</label>
         <input
           id="product-stock"
           type="number"
@@ -118,7 +118,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
       </div>
 
       <div className="form-field">
-        <label htmlFor="product-image-url">Image URL</label>
+        <label htmlFor="product-image-url">آدرس تصویر</label>
         <input
           id="product-image-url"
           type="text"
@@ -134,7 +134,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
       )}
 
       <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
-        {submitting ? 'Saving...' : submitLabel}
+        {submitting ? 'در حال ذخیره...' : submitLabel}
       </button>
     </form>
   )

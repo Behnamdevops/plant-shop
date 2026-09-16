@@ -14,6 +14,7 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
+	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -67,6 +68,23 @@ func main() {
 	orderRepository := order.NewRepository(db)
 	orderHandler := order.NewHandler(orderRepository, authHandler)
 
+	// ZarinPal Payment V1. ZARINPAL_MERCHANT_ID and ZARINPAL_CALLBACK_URL
+	// are required to accept real payments; if unset the payment endpoints
+	// are still registered (so the rest of the app keeps working) but any
+	// request to them will fail at the ZarinPal API call itself with a
+	// clear provider error, since an empty merchant_id is always rejected
+	// by ZarinPal. ZARINPAL_SANDBOX=true switches to ZarinPal's sandbox
+	// host for testing without moving real money.
+	zarinpalMerchantID := os.Getenv("ZARINPAL_MERCHANT_ID")
+	zarinpalCallbackURL := os.Getenv("ZARINPAL_CALLBACK_URL")
+	zarinpalSandbox := os.Getenv("ZARINPAL_SANDBOX") == "true"
+	if zarinpalMerchantID == "" || zarinpalCallbackURL == "" {
+		log.Println("warning: ZARINPAL_MERCHANT_ID or ZARINPAL_CALLBACK_URL is not set; ZarinPal payments will fail until configured")
+	}
+	zarinpalClient := payment.NewZarinPalClient(zarinpalMerchantID, zarinpalSandbox)
+	paymentRepository := payment.NewRepository(db)
+	paymentHandler := payment.NewHandler(paymentRepository, authHandler, zarinpalClient, zarinpalCallbackURL)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -98,10 +116,15 @@ func main() {
 	mux.HandleFunc("POST /api/v1/orders", orderHandler.Create)
 	mux.HandleFunc("GET /api/v1/orders", orderHandler.List)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orderHandler.GetByID)
+	mux.HandleFunc("POST /api/v1/orders/{id}/cancel", orderHandler.Cancel)
 
 	mux.HandleFunc("GET /api/v1/admin/orders", orderHandler.AdminList)
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
 	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
+
+	mux.HandleFunc("POST /api/v1/orders/{id}/payments/zarinpal", paymentHandler.RequestZarinPal)
+	mux.HandleFunc("GET /api/v1/payments/zarinpal/callback", paymentHandler.Callback)
+	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

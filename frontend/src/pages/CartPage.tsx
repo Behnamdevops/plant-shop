@@ -4,6 +4,7 @@ import { deleteCartItem, getCart, updateCartItem } from '../api/cart'
 import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
 import { useAuth } from '../hooks/useAuth'
+import { formatToman } from '../lib/format'
 
 export default function CartPage() {
   const { user, loading: authLoading } = useAuth()
@@ -39,7 +40,7 @@ export default function CartPage() {
         if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load cart')
+          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سبد خرید پیش آمد')
         }
       })
       .finally(() => {
@@ -66,7 +67,7 @@ export default function CartPage() {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
-        setError(err instanceof Error ? err.message : 'Could not update item')
+        setError(err instanceof Error ? err.message : 'مشکلی در به‌روزرسانی کالا پیش آمد')
       }
     } finally {
       setPendingItemId(null)
@@ -84,7 +85,7 @@ export default function CartPage() {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
-        setError(err instanceof Error ? err.message : 'Could not remove item')
+        setError(err instanceof Error ? err.message : 'مشکلی در حذف کالا پیش آمد')
       }
     } finally {
       setPendingItemId(null)
@@ -98,8 +99,8 @@ export default function CartPage() {
   if (authLoading || (!user && loading)) {
     return (
       <main>
-        <h1>Your cart</h1>
-        <p className="state-message">Loading cart...</p>
+        <h1>سبد خرید شما</h1>
+        <p className="state-message">در حال بارگذاری سبد خرید...</p>
       </main>
     )
   }
@@ -107,9 +108,9 @@ export default function CartPage() {
   if (!user || unauthorized) {
     return (
       <main>
-        <h1>Your cart</h1>
+        <h1>سبد خرید شما</h1>
         <p className="empty-state">
-          Please <Link to="/login">log in</Link> to view your cart.
+          برای مشاهده سبد خرید، <Link to="/login">وارد شوید</Link>.
         </p>
       </main>
     )
@@ -118,8 +119,8 @@ export default function CartPage() {
   if (loading) {
     return (
       <main>
-        <h1>Your cart</h1>
-        <p className="state-message">Loading cart...</p>
+        <h1>سبد خرید شما</h1>
+        <p className="state-message">در حال بارگذاری سبد خرید...</p>
       </main>
     )
   }
@@ -127,12 +128,12 @@ export default function CartPage() {
   if (error) {
     return (
       <main>
-        <h1>Your cart</h1>
+        <h1>سبد خرید شما</h1>
         <p className="alert alert-error" role="alert">
           {error}
         </p>
         <button type="button" className="btn btn-secondary" onClick={reload}>
-          Retry
+          تلاش دوباره
         </button>
       </main>
     )
@@ -141,9 +142,9 @@ export default function CartPage() {
   if (!cart || cart.items.length === 0) {
     return (
       <main>
-        <h1>Your cart</h1>
+        <h1>سبد خرید شما</h1>
         <p className="empty-state">
-          Your cart is empty. <Link to="/">Browse products</Link>
+          سبد خرید شما خالی است. <Link to="/">مشاهده محصولات</Link>
         </p>
       </main>
     )
@@ -151,16 +152,16 @@ export default function CartPage() {
 
   return (
     <main>
-      <h1>Your cart</h1>
+      <h1>سبد خرید شما</h1>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Unit price</th>
-              <th>Quantity</th>
-              <th>Subtotal</th>
+              <th>محصول</th>
+              <th>قیمت واحد</th>
+              <th>تعداد</th>
+              <th>جمع جزء</th>
               <th></th>
             </tr>
           </thead>
@@ -170,14 +171,14 @@ export default function CartPage() {
                 <td>
                   <Link to={`/products/${item.slug}`}>{item.name}</Link>
                 </td>
-                <td className="price">{item.price}</td>
+                <td className="price">{formatToman(item.price)}</td>
                 <td>
                   <div className="qty-control">
                     <button
                       type="button"
                       onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
                       disabled={pendingItemId === item.id || item.quantity <= 1}
-                      aria-label={`Decrease quantity of ${item.name}`}
+                      aria-label={`کم کردن تعداد ${item.name}`}
                     >
                       -
                     </button>
@@ -192,19 +193,19 @@ export default function CartPage() {
                           handleQuantityChange(item.id, value)
                         }
                       }}
-                      aria-label={`Quantity of ${item.name}`}
+                      aria-label={`تعداد ${item.name}`}
                     />
                     <button
                       type="button"
                       onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
                       disabled={pendingItemId === item.id}
-                      aria-label={`Increase quantity of ${item.name}`}
+                      aria-label={`افزودن تعداد ${item.name}`}
                     >
                       +
                     </button>
                   </div>
                 </td>
-                <td className="price">{item.subtotal}</td>
+                <td className="price">{formatToman(item.subtotal)}</td>
                 <td>
                   <button
                     type="button"
@@ -212,7 +213,7 @@ export default function CartPage() {
                     onClick={() => handleDelete(item.id)}
                     disabled={pendingItemId === item.id}
                   >
-                    Remove
+                    حذف
                   </button>
                 </td>
               </tr>
@@ -223,12 +224,12 @@ export default function CartPage() {
 
       <div className="cart-summary">
         <span className="cart-summary__total">
-          Total: <span className="price">{cart.total}</span>
+          جمع کل: <span className="price">{formatToman(cart.total)}</span>
         </span>
 
         {cart.items.length > 0 && (
           <button type="button" className="btn btn-primary" onClick={handleCheckout}>
-            Checkout
+            ادامه به تسویه حساب
           </button>
         )}
       </div>

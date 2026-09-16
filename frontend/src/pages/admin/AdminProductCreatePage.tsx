@@ -14,8 +14,8 @@ export default function AdminProductCreatePage() {
   return (
     <main>
       <div className="form-card">
-        <h1>New product</h1>
-        <ProductForm submitLabel="Create product" onSubmit={handleSubmit} />
+        <h1>محصول جدید</h1>
+        <ProductForm submitLabel="ایجاد محصول" onSubmit={handleSubmit} />
       </div>
     </main>
   )

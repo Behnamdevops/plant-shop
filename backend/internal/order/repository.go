@@ -354,8 +354,10 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 	}
 	defer tx.Rollback(ctx)
 
-	var currentStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`, orderID).Scan(&currentStatus)
+	var currentStatus, paymentStatus, paymentMethod string
+	err = tx.QueryRow(ctx, `
+		SELECT status, payment_status, payment_method FROM orders WHERE id = $1 FOR UPDATE
+	`, orderID).Scan(&currentStatus, &paymentStatus, &paymentMethod)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return AdminOrderWithItems{}, ErrOrderNotFound
@@ -365,6 +367,15 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 
 	if !CanTransition(currentStatus, newStatus) {
 		return AdminOrderWithItems{}, ErrInvalidTransition
+	}
+
+	// A ZarinPal order may not advance into processing/shipped/delivered
+	// until its payment has actually been verified. This is enforced here
+	// (server-side, inside the same row-locked transaction as the status
+	// check) rather than trusting the caller, since payment_status can
+	// change concurrently via the payment callback.
+	if RequiresPaidPayment(paymentMethod, newStatus) && paymentStatus != PaymentStatusPaid {
+		return AdminOrderWithItems{}, ErrPaymentRequired
 	}
 
 	// Cancelling an order restores each item's quantity back to product
@@ -379,44 +390,8 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 	// terminal and can only be reached from 'shipped', never followed by
 	// 'cancelled').
 	if newStatus == StatusCancelled {
-		itemRows, err := tx.Query(ctx, `
-			SELECT product_id, quantity FROM order_items WHERE order_id = $1 ORDER BY product_id
-		`, orderID)
-		if err != nil {
+		if err := restoreOrderStock(ctx, tx, orderID); err != nil {
 			return AdminOrderWithItems{}, err
-		}
-		type restoreLine struct {
-			ProductID int64
-			Quantity  int
-		}
-		var toRestore []restoreLine
-		for itemRows.Next() {
-			var l restoreLine
-			if err := itemRows.Scan(&l.ProductID, &l.Quantity); err != nil {
-				itemRows.Close()
-				return AdminOrderWithItems{}, err
-			}
-			toRestore = append(toRestore, l)
-		}
-		if err := itemRows.Err(); err != nil {
-			return AdminOrderWithItems{}, err
-		}
-		itemRows.Close()
-
-		// Lock the affected product rows (in a stable order) before
-		// restoring stock, to avoid racing with a concurrent checkout
-		// that locks the same rows via "FOR UPDATE OF p".
-		for _, l := range toRestore {
-			if _, err := tx.Exec(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, l.ProductID); err != nil {
-				return AdminOrderWithItems{}, err
-			}
-		}
-		for _, l := range toRestore {
-			if _, err := tx.Exec(ctx, `
-				UPDATE products SET stock = stock + $1, updated_at = NOW() WHERE id = $2
-			`, l.Quantity, l.ProductID); err != nil {
-				return AdminOrderWithItems{}, err
-			}
 		}
 	}
 
@@ -432,4 +407,107 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 	// Re-read the full record (with items/customer) outside the write
 	// transaction now that the update has committed.
 	return r.GetByID(ctx, orderID)
+}
+
+// CancelOwnOrder lets a customer cancel their own order, restoring
+// inventory via the same code path as admin cancellation. It only
+// succeeds if the order belongs to userID, the state machine allows a
+// transition to cancelled from the order's current status (so e.g.
+// shipped/delivered/already-cancelled orders are rejected exactly like the
+// admin path), and the order's payment has not already succeeded — a paid
+// order requires admin-mediated cancellation/refund instead of a
+// self-service customer action.
+func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) (OrderWithItems, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return OrderWithItems{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var currentStatus, paymentStatus string
+	var ownerUserID int64
+	err = tx.QueryRow(ctx, `
+		SELECT status, payment_status, user_id FROM orders WHERE id = $1 FOR UPDATE
+	`, orderID).Scan(&currentStatus, &paymentStatus, &ownerUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return OrderWithItems{}, ErrOrderNotFound
+		}
+		return OrderWithItems{}, err
+	}
+	if ownerUserID != userID {
+		// Do not distinguish "exists but belongs to someone else" from
+		// "does not exist", mirroring GetByIDForUser's behavior elsewhere
+		// in this package.
+		return OrderWithItems{}, ErrOrderNotFound
+	}
+
+	if paymentStatus == PaymentStatusPaid {
+		return OrderWithItems{}, ErrOrderNotEligibleForCancel
+	}
+
+	if !CanTransition(currentStatus, StatusCancelled) {
+		return OrderWithItems{}, ErrInvalidTransition
+	}
+
+	if err := restoreOrderStock(ctx, tx, orderID); err != nil {
+		return OrderWithItems{}, err
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, StatusCancelled, orderID)
+	if err != nil {
+		return OrderWithItems{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return OrderWithItems{}, err
+	}
+
+	return r.GetByIDForUser(ctx, userID, orderID)
+}
+
+// restoreOrderStock restores the stock quantities consumed by orderID's
+// items, locking the affected product rows first (in ascending product_id
+// order) so it never races with a concurrent checkout's
+// "FOR UPDATE OF p" lock. Shared by admin cancellation (UpdateStatus) and
+// customer self-cancellation (CancelOwnOrder) so inventory is restored via
+// exactly one code path.
+func restoreOrderStock(ctx context.Context, tx pgx.Tx, orderID int64) error {
+	itemRows, err := tx.Query(ctx, `
+		SELECT product_id, quantity FROM order_items WHERE order_id = $1 ORDER BY product_id
+	`, orderID)
+	if err != nil {
+		return err
+	}
+	type restoreLine struct {
+		ProductID int64
+		Quantity  int
+	}
+	var toRestore []restoreLine
+	for itemRows.Next() {
+		var l restoreLine
+		if err := itemRows.Scan(&l.ProductID, &l.Quantity); err != nil {
+			itemRows.Close()
+			return err
+		}
+		toRestore = append(toRestore, l)
+	}
+	if err := itemRows.Err(); err != nil {
+		return err
+	}
+	itemRows.Close()
+
+	for _, l := range toRestore {
+		if _, err := tx.Exec(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, l.ProductID); err != nil {
+			return err
+		}
+	}
+	for _, l := range toRestore {
+		if _, err := tx.Exec(ctx, `
+			UPDATE products SET stock = stock + $1, updated_at = NOW() WHERE id = $2
+		`, l.Quantity, l.ProductID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

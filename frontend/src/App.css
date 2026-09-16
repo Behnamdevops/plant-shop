@@ -254,13 +254,9 @@
   font-size: 1.05rem;
 }
 
-.price::before {
-  /* Set from src/config.ts (VITE_CURRENCY_SYMBOL) via a CSS custom
-     property on :root in main.tsx; falls back to '$' if unset. */
-  content: var(--currency-symbol, '$');
-  opacity: 0.7;
-  margin-right: 1px;
-}
+/* Prices are now rendered as plain Persian-formatted "N تومان" text via
+   src/lib/format.ts (formatToman), not a CSS-injected currency symbol —
+   see the removed --currency-symbol/::before rule this replaced. */
 
 /* ---------- Stock badges ---------- */
 
@@ -464,7 +460,7 @@ th,
 td {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  text-align: left;
+  text-align: start;
   vertical-align: middle;
 }
 

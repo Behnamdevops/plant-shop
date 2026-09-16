@@ -37,7 +37,10 @@ export function emptyCheckoutInput(): CheckoutInput {
     address_line2: '',
     city: '',
     postal_code: '',
-    country: '',
+    // Iran-only storefront V1: default the country field to ایران for UX.
+    // The backend does not hard-code this — it's just a sensible default
+    // in the form; the field is still a free-text snapshot on the server.
+    country: 'ایران',
     shipping_method: 'standard',
   }
 }

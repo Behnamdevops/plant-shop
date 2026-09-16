@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getAdminOrders } from '../../api/orders'
 import type { AdminOrderSummary } from '../../types/order'
+import { formatDateFa, formatToman } from '../../lib/format'
+import { orderStatusLabel, paymentStatusLabel, shippingMethodLabel } from '../../lib/labels'
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrderSummary[] | null>(null)
@@ -23,7 +25,7 @@ export default function AdminOrdersPage() {
         if (!ignore) setOrders(data)
       })
       .catch((err) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load orders')
+        if (!ignore) setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سفارش‌ها پیش آمد')
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -37,11 +39,11 @@ export default function AdminOrdersPage() {
   return (
     <main>
       <div className="page-header">
-        <h1>Admin · Orders</h1>
-        <p className="page-subtitle">Inspect and manage customer orders.</p>
+        <h1>مدیریت · سفارش‌ها</h1>
+        <p className="page-subtitle">مشاهده و مدیریت سفارش‌های مشتریان.</p>
       </div>
 
-      {loading && <p className="state-message">Loading orders...</p>}
+      {loading && <p className="state-message">در حال بارگذاری سفارش‌ها...</p>}
 
       {!loading && error && (
         <>
@@ -49,13 +51,13 @@ export default function AdminOrdersPage() {
             {error}
           </p>
           <button type="button" className="btn btn-secondary" onClick={reload}>
-            Retry
+            تلاش دوباره
           </button>
         </>
       )}
 
       {!loading && !error && orders && orders.length === 0 && (
-        <p className="empty-state">No orders yet.</p>
+        <p className="empty-state">هنوز سفارشی ثبت نشده است.</p>
       )}
 
       {!loading && !error && orders && orders.length > 0 && (
@@ -63,13 +65,13 @@ export default function AdminOrdersPage() {
           <table>
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Payment</th>
-                <th>Shipping</th>
-                <th>Total</th>
-                <th>Placed</th>
+                <th>سفارش</th>
+                <th>مشتری</th>
+                <th>وضعیت</th>
+                <th>پرداخت</th>
+                <th>ارسال</th>
+                <th>جمع کل</th>
+                <th>تاریخ ثبت</th>
                 <th></th>
               </tr>
             </thead>
@@ -83,15 +85,15 @@ export default function AdminOrdersPage() {
                     <span className="site-header__user">{order.customer.email}</span>
                   </td>
                   <td>
-                    <span className="status-badge">{order.status}</span>
+                    <span className="status-badge">{orderStatusLabel(order.status)}</span>
                   </td>
-                  <td>{order.payment_status}</td>
-                  <td>{order.shipping_method}</td>
-                  <td className="price">{order.total}</td>
-                  <td>{new Date(order.created_at).toLocaleString()}</td>
+                  <td>{paymentStatusLabel(order.payment_status)}</td>
+                  <td>{shippingMethodLabel(order.shipping_method)}</td>
+                  <td className="price">{formatToman(order.total)}</td>
+                  <td>{formatDateFa(order.created_at)}</td>
                   <td>
                     <Link to={`/admin/orders/${order.id}`} className="btn btn-secondary btn-sm">
-                      View
+                      مشاهده
                     </Link>
                   </td>
                 </tr>

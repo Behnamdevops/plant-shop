@@ -256,6 +256,44 @@ func (h *Handler) AdminUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "order not found", http.StatusNotFound)
 		case errors.Is(err, ErrInvalidTransition):
 			http.Error(w, "invalid status transition", http.StatusConflict)
+		case errors.Is(err, ErrPaymentRequired):
+			http.Error(w, "order payment must be verified before fulfillment", http.StatusConflict)
+		default:
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(o)
+}
+
+// Cancel lets the authenticated customer cancel their own order, provided
+// it belongs to them, its payment has not already succeeded, and the
+// order's current status still allows a transition to cancelled (e.g. not
+// already shipped/delivered/cancelled). Inventory is restored via the same
+// code path used by admin cancellation.
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	userID, err := h.auth.Authenticate(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	orderID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || orderID <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	o, err := h.repository.CancelOwnOrder(r.Context(), userID, orderID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrOrderNotFound):
+			http.Error(w, "order not found", http.StatusNotFound)
+		case errors.Is(err, ErrInvalidTransition), errors.Is(err, ErrOrderNotEligibleForCancel):
+			http.Error(w, "order cannot be cancelled", http.StatusConflict)
 		default:
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}

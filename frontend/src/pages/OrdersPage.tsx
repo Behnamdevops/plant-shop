@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getOrders } from '../api/orders'
+import { requestZarinPalPayment } from '../api/payments'
 import { ApiError } from '../api/errors'
 import type { OrderSummary } from '../types/order'
 import { useAuth } from '../hooks/useAuth'
+import { formatDateFa, formatToman } from '../lib/format'
+import { orderStatusLabel, paymentStatusLabel, shippingMethodLabel } from '../lib/labels'
 
 export default function OrdersPage() {
   const { user, loading: authLoading } = useAuth()
@@ -12,11 +15,25 @@ export default function OrdersPage() {
   const [error, setError] = useState('')
   const [unauthorized, setUnauthorized] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const [payingId, setPayingId] = useState<number | null>(null)
+  const [payError, setPayError] = useState('')
 
   const reload = () => {
     setLoading(true)
     setError('')
     setReloadKey((key) => key + 1)
+  }
+
+  const handlePay = async (orderId: number) => {
+    setPayError('')
+    setPayingId(orderId)
+    try {
+      const { redirect_url } = await requestZarinPalPayment(orderId)
+      window.location.assign(redirect_url)
+    } catch {
+      setPayError('اتصال به درگاه پرداخت زرین‌پال با مشکل مواجه شد. دوباره تلاش کنید.')
+      setPayingId(null)
+    }
   }
 
   useEffect(() => {
@@ -37,7 +54,7 @@ export default function OrdersPage() {
         if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load orders')
+          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سفارش‌ها پیش آمد')
         }
       })
       .finally(() => {
@@ -52,8 +69,8 @@ export default function OrdersPage() {
   if (authLoading || (!user && loading)) {
     return (
       <main>
-        <h1>Your orders</h1>
-        <p className="state-message">Loading orders...</p>
+        <h1>سفارش‌های من</h1>
+        <p className="state-message">در حال بارگذاری سفارش‌ها...</p>
       </main>
     )
   }
@@ -61,9 +78,9 @@ export default function OrdersPage() {
   if (!user || unauthorized) {
     return (
       <main>
-        <h1>Your orders</h1>
+        <h1>سفارش‌های من</h1>
         <p className="empty-state">
-          Please <Link to="/login">log in</Link> to view your orders.
+          برای مشاهده سفارش‌ها، <Link to="/login">وارد شوید</Link>.
         </p>
       </main>
     )
@@ -72,8 +89,8 @@ export default function OrdersPage() {
   if (loading) {
     return (
       <main>
-        <h1>Your orders</h1>
-        <p className="state-message">Loading orders...</p>
+        <h1>سفارش‌های من</h1>
+        <p className="state-message">در حال بارگذاری سفارش‌ها...</p>
       </main>
     )
   }
@@ -81,12 +98,12 @@ export default function OrdersPage() {
   if (error) {
     return (
       <main>
-        <h1>Your orders</h1>
+        <h1>سفارش‌های من</h1>
         <p className="alert alert-error" role="alert">
           {error}
         </p>
         <button type="button" className="btn btn-secondary" onClick={reload}>
-          Retry
+          تلاش دوباره
         </button>
       </main>
     )
@@ -95,28 +112,41 @@ export default function OrdersPage() {
   if (!orders || orders.length === 0) {
     return (
       <main>
-        <h1>Your orders</h1>
+        <h1>سفارش‌های من</h1>
         <p className="empty-state">
-          You have no orders yet. <Link to="/">Browse products</Link>
+          هنوز سفارشی ثبت نکرده‌اید. <Link to="/">مشاهده محصولات</Link>
         </p>
       </main>
     )
   }
 
+  // A ZarinPal order is eligible for (re)payment as long as it hasn't been
+  // paid yet and hasn't reached a terminal state. "manual" orders are not
+  // offered a pay button here — V1 has no gateway-driven manual flow.
+  const canPay = (order: OrderSummary) =>
+    order.payment_status !== 'paid' && order.status !== 'cancelled' && order.status !== 'delivered'
+
   return (
     <main>
-      <h1>Your orders</h1>
+      <h1>سفارش‌های من</h1>
+
+      {payError && (
+        <p className="alert alert-error" role="alert">
+          {payError}
+        </p>
+      )}
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Order</th>
-              <th>Status</th>
-              <th>Payment</th>
-              <th>Shipping</th>
-              <th>Total</th>
-              <th>Placed</th>
+              <th>سفارش</th>
+              <th>وضعیت</th>
+              <th>پرداخت</th>
+              <th>ارسال</th>
+              <th>جمع کل</th>
+              <th>تاریخ ثبت</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -126,12 +156,28 @@ export default function OrdersPage() {
                   <Link to={`/orders/${order.id}`}>#{order.id}</Link>
                 </td>
                 <td>
-                  <span className="status-badge">{order.status}</span>
+                  <span className="status-badge">{orderStatusLabel(order.status)}</span>
                 </td>
-                <td>{order.payment_status}</td>
-                <td>{order.shipping_method}</td>
-                <td className="price">{order.total}</td>
-                <td>{new Date(order.created_at).toLocaleString()}</td>
+                <td>{paymentStatusLabel(order.payment_status)}</td>
+                <td>{shippingMethodLabel(order.shipping_method)}</td>
+                <td className="price">{formatToman(order.total)}</td>
+                <td>{formatDateFa(order.created_at)}</td>
+                <td>
+                  {canPay(order) && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handlePay(order.id)}
+                      disabled={payingId === order.id}
+                    >
+                      {payingId === order.id
+                        ? 'در حال انتقال...'
+                        : order.payment_status === 'failed'
+                          ? 'تلاش مجدد برای پرداخت'
+                          : 'پرداخت'}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
