@@ -99,6 +99,10 @@ func main() {
 	mux.HandleFunc("GET /api/v1/orders", orderHandler.List)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orderHandler.GetByID)
 
+	mux.HandleFunc("GET /api/v1/admin/orders", orderHandler.AdminList)
+	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
+	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
+
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           mux,

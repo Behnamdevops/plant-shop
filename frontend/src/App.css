@@ -399,6 +399,19 @@
   border-color: var(--primary);
 }
 
+.form-field select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.form-field select:focus-visible {
+  border-color: var(--primary);
+}
+
 .form-footer {
   margin-top: 16px;
   text-align: center;

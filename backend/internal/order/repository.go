@@ -188,3 +188,124 @@ func (r *Repository) GetByIDForUser(ctx context.Context, userID, orderID int64) 
 
 	return OrderWithItems{Order: o, Items: items}, nil
 }
+
+// ListAll returns every order in the system, newest first, along with the
+// safe customer identity for each. Intended for admin use only — callers
+// must enforce admin authorization before calling this.
+func (r *Repository) ListAll(ctx context.Context) ([]AdminOrder, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT o.id, o.user_id, o.status, o.total, o.created_at, o.updated_at,
+		       u.id, u.name, u.email
+		FROM orders o
+		JOIN users u ON u.id = o.user_id
+		ORDER BY o.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make([]AdminOrder, 0)
+	for rows.Next() {
+		var o AdminOrder
+		if err := rows.Scan(
+			&o.ID, &o.UserID, &o.Status, &o.Total, &o.CreatedAt, &o.UpdatedAt,
+			&o.Customer.ID, &o.Customer.Name, &o.Customer.Email,
+		); err != nil {
+			return nil, err
+		}
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}
+
+// GetByID returns the order (with its items and customer identity)
+// identified by orderID, regardless of which user it belongs to. Intended
+// for admin use only — callers must enforce admin authorization before
+// calling this. Returns ErrOrderNotFound if no such order exists.
+func (r *Repository) GetByID(ctx context.Context, orderID int64) (AdminOrderWithItems, error) {
+	var o AdminOrderWithItems
+	err := r.db.QueryRow(ctx, `
+		SELECT o.id, o.user_id, o.status, o.total, o.created_at, o.updated_at,
+		       u.id, u.name, u.email
+		FROM orders o
+		JOIN users u ON u.id = o.user_id
+		WHERE o.id = $1
+	`, orderID).Scan(
+		&o.ID, &o.UserID, &o.Status, &o.Total, &o.CreatedAt, &o.UpdatedAt,
+		&o.Customer.ID, &o.Customer.Name, &o.Customer.Email,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AdminOrderWithItems{}, ErrOrderNotFound
+		}
+		return AdminOrderWithItems{}, err
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT id, order_id, product_id, product_name, product_slug, unit_price, quantity, subtotal
+		FROM order_items
+		WHERE order_id = $1
+		ORDER BY id
+	`, o.ID)
+	if err != nil {
+		return AdminOrderWithItems{}, err
+	}
+	defer rows.Close()
+
+	items := make([]Item, 0)
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.ID, &it.OrderID, &it.ProductID, &it.ProductName, &it.ProductSlug, &it.UnitPrice, &it.Quantity, &it.Subtotal); err != nil {
+			return AdminOrderWithItems{}, err
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return AdminOrderWithItems{}, err
+	}
+
+	o.Items = items
+	return o, nil
+}
+
+// UpdateStatus transitions orderID to newStatus and returns the updated
+// order (with items and customer identity). It re-reads the order's current
+// status inside the same transaction (SELECT ... FOR UPDATE) to guard
+// against a concurrent status change racing this one, and rejects the
+// transition with ErrInvalidTransition if it isn't allowed from the order's
+// current status. Callers must validate newStatus with IsValidStatus before
+// calling this. Returns ErrOrderNotFound if no such order exists.
+func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus string) (AdminOrderWithItems, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return AdminOrderWithItems{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`, orderID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AdminOrderWithItems{}, ErrOrderNotFound
+		}
+		return AdminOrderWithItems{}, err
+	}
+
+	if !CanTransition(currentStatus, newStatus) {
+		return AdminOrderWithItems{}, ErrInvalidTransition
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, newStatus, orderID)
+	if err != nil {
+		return AdminOrderWithItems{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return AdminOrderWithItems{}, err
+	}
+
+	// Re-read the full record (with items/customer) outside the write
+	// transaction now that the update has committed.
+	return r.GetByID(ctx, orderID)
+}

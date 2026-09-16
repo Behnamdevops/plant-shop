@@ -2,6 +2,7 @@ package order
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,10 +60,23 @@ func handlerUniqueSuffix() string {
 // client would (never trusting a client-supplied user_id).
 func (e *testHandlerEnv) registerAndLogin(t *testing.T) *http.Cookie {
 	t.Helper()
+	cookie, _ := e.registerAndLoginWithRole(t, auth.RoleUser)
+	return cookie
+}
+
+// registerAndLoginWithRole creates a new user with the given role via the
+// real auth handler/repository and returns both the session cookie and the
+// created user's email, so admin requests authenticate the same way a real
+// client would (role is never trusted from the request itself) and callers
+// can look up the user's id/email if needed. Cleans up the user and their
+// sessions after the test.
+func (e *testHandlerEnv) registerAndLoginWithRole(t *testing.T, role string) (*http.Cookie, string) {
+	t.Helper()
 	suffix := handlerUniqueSuffix()
+	email := "orderuser-" + suffix + "@example.com"
 	body, _ := json.Marshal(map[string]any{
 		"name":     "orderuser-" + suffix,
-		"email":    "orderuser-" + suffix + "@example.com",
+		"email":    email,
 		"password": "password123",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
@@ -71,14 +85,27 @@ func (e *testHandlerEnv) registerAndLogin(t *testing.T) *http.Cookie {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("setup registration failed: got %d", w.Code)
 	}
+
+	if role == auth.RoleAdmin {
+		if _, err := e.db.Exec(t.Context(), `UPDATE users SET role = $1 WHERE email = $2`, auth.RoleAdmin, email); err != nil {
+			t.Fatalf("failed to promote test user to admin: %v", err)
+		}
+	}
+
+	t.Cleanup(func() {
+		e.db.Exec(context.Background(), `DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = $1)`, email)
+		e.db.Exec(context.Background(), `DELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE email = $1)`, email)
+		e.db.Exec(context.Background(), `DELETE FROM users WHERE email = $1`, email)
+	})
+
 	res := w.Result()
 	for _, c := range res.Cookies() {
 		if c.Name == "session_token" {
-			return c
+			return c, email
 		}
 	}
 	t.Fatal("no session_token cookie set on registration")
-	return nil
+	return nil, ""
 }
 
 func (e *testHandlerEnv) createProduct(t *testing.T, stock int) product.Product {
@@ -327,5 +354,379 @@ func TestHandlerGetByIDNotFound(t *testing.T) {
 	env.handler.GetByID(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("got status %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// ---------- Admin authorization ----------
+
+func TestHandlerAdminListUnauthenticated(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders", nil)
+	w := httptest.NewRecorder()
+	env.handler.AdminList(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandlerAdminListNonAdminForbidden(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	user, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders", nil)
+	req.AddCookie(user)
+	w := httptest.NewRecorder()
+	env.handler.AdminList(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandlerAdminListAdminSuccess(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders", nil)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminList(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+func TestHandlerAdminGetByIDUnauthenticated(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/1", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandlerAdminGetByIDNonAdminForbidden(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	user, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/1", nil)
+	req.SetPathValue("id", "1")
+	req.AddCookie(user)
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandlerAdminUpdateStatusUnauthenticated(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	body, _ := json.Marshal(map[string]any{"status": "processing"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/1/status", bytes.NewReader(body))
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandlerAdminUpdateStatusNonAdminForbidden(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	user, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	body, _ := json.Marshal(map[string]any{"status": "processing"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/1/status", bytes.NewReader(body))
+	req.SetPathValue("id", "1")
+	req.AddCookie(user)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+// ---------- Admin behavior ----------
+
+// createOrderForUser places an order for cookie's user containing one unit
+// of a freshly created product, and returns the created order.
+func (e *testHandlerEnv) createOrderForUser(t *testing.T, cookie *http.Cookie) Order {
+	t.Helper()
+	p := e.createProduct(t, 10)
+	e.addToCart(t, cookie, p.ID, 1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	e.handler.Create(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup order failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+	var o Order
+	json.NewDecoder(w.Body).Decode(&o)
+	return o
+}
+
+func TestHandlerAdminListSeesOrdersFromMultipleUsers(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	userA, emailA := env.registerAndLoginWithRole(t, auth.RoleUser)
+	userB, emailB := env.registerAndLoginWithRole(t, auth.RoleUser)
+
+	orderA := env.createOrderForUser(t, userA)
+	orderB := env.createOrderForUser(t, userB)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders", nil)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminList(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var orders []AdminOrder
+	if err := json.NewDecoder(w.Body).Decode(&orders); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	foundA, foundB := false, false
+	for _, o := range orders {
+		if o.ID == orderA.ID {
+			foundA = true
+			if o.Customer.Email != emailA {
+				t.Errorf("expected order A customer email %q, got %q", emailA, o.Customer.Email)
+			}
+		}
+		if o.ID == orderB.ID {
+			foundB = true
+			if o.Customer.Email != emailB {
+				t.Errorf("expected order B customer email %q, got %q", emailB, o.Customer.Email)
+			}
+		}
+	}
+	if !foundA || !foundB {
+		t.Fatalf("expected admin list to include orders from both users; foundA=%v foundB=%v", foundA, foundB)
+	}
+}
+
+func TestHandlerAdminGetByIDReturnsCustomerAndItems(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, buyerEmail := env.registerAndLoginWithRole(t, auth.RoleUser)
+	_ = buyer
+
+	order := env.createOrderForUser(t, buyer)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/"+idStr, nil)
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var full AdminOrderWithItems
+	if err := json.NewDecoder(w.Body).Decode(&full); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if full.ID != order.ID {
+		t.Errorf("expected order id %d, got %d", order.ID, full.ID)
+	}
+	if full.Customer.Email != buyerEmail {
+		t.Errorf("expected customer email %q, got %q", buyerEmail, full.Customer.Email)
+	}
+	if len(full.Items) != 1 {
+		t.Fatalf("expected 1 order item, got %d", len(full.Items))
+	}
+}
+
+func TestHandlerAdminGetByIDInvalidID(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/abc", nil)
+	req.SetPathValue("id", "abc")
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlerAdminGetByIDNotFound(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders/999999999999", nil)
+	req.SetPathValue("id", "999999999999")
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminGetByID(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandlerAdminUpdateStatusInvalidID(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	body, _ := json.Marshal(map[string]any{"status": "processing"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/abc/status", bytes.NewReader(body))
+	req.SetPathValue("id", "abc")
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlerAdminUpdateStatusNotFound(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	body, _ := json.Marshal(map[string]any{"status": "processing"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/999999999999/status", bytes.NewReader(body))
+	req.SetPathValue("id", "999999999999")
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandlerAdminUpdateStatusInvalidStatus(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	body, _ := json.Marshal(map[string]any{"status": "not-a-real-status"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestHandlerAdminUpdateStatusInvalidBody(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader([]byte("not json")))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlerAdminUpdateStatusValidTransitionSucceeds(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+
+	idStr := strconv.FormatInt(order.ID, 10)
+	body, _ := json.Marshal(map[string]any{"status": StatusProcessing})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var updated AdminOrderWithItems
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.Status != StatusProcessing {
+		t.Errorf("expected status %q, got %q", StatusProcessing, updated.Status)
+	}
+}
+
+func TestHandlerAdminUpdateStatusInvalidTransitionConflict(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+
+	// pending -> shipped is not a valid transition (must go through
+	// processing first).
+	idStr := strconv.FormatInt(order.ID, 10)
+	body, _ := json.Marshal(map[string]any{"status": StatusShipped})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("got status %d, want %d, body=%s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
+func TestHandlerAdminUpdateStatusDeliveredIsTerminal(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	// Walk the order through the full happy path to "delivered".
+	for _, status := range []string{StatusProcessing, StatusShipped, StatusDelivered} {
+		body, _ := json.Marshal(map[string]any{"status": status})
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+		req.SetPathValue("id", idStr)
+		req.AddCookie(admin)
+		w := httptest.NewRecorder()
+		env.handler.AdminUpdateStatus(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("transition to %q failed: got %d, body=%s", status, w.Code, w.Body.String())
+		}
+	}
+
+	// Now delivered -> anything must be rejected.
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected delivered->cancelled to be rejected with 409, got %d", w.Code)
+	}
+}
+
+func TestHandlerAdminUpdateStatusCancelledIsTerminal(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer, _ := env.registerAndLoginWithRole(t, auth.RoleUser)
+	order := env.createOrderForUser(t, buyer)
+	idStr := strconv.FormatInt(order.ID, 10)
+
+	body, _ := json.Marshal(map[string]any{"status": StatusCancelled})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body))
+	req.SetPathValue("id", idStr)
+	req.AddCookie(admin)
+	w := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("transition to cancelled failed: got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	body2, _ := json.Marshal(map[string]any{"status": StatusProcessing})
+	req2 := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+idStr+"/status", bytes.NewReader(body2))
+	req2.SetPathValue("id", idStr)
+	req2.AddCookie(admin)
+	w2 := httptest.NewRecorder()
+	env.handler.AdminUpdateStatus(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Fatalf("expected cancelled->processing to be rejected with 409, got %d", w2.Code)
 	}
 }
