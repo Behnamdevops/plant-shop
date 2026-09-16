@@ -3,8 +3,10 @@ package product
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,26 +29,32 @@ func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 func int64Ptr(i int64) *int64 { return &i }
 
+func uniqueSlug(prefix string) string { return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()) }
+
 func TestRepositoryCreate(t *testing.T) {
 	repo := newTestRepository(t)
 
+	slug := uniqueSlug("repo-test-plant")
 	product, err := repo.Create(context.Background(), CreateProductInput{
 		Name:  "Repo Test Plant",
-		Slug:  "repo-test-plant",
+		Slug:  slug,
 		Price: 50,
 		Stock: 3,
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
+	t.Cleanup(func() {
+		repo.db.Exec(context.Background(), "DELETE FROM products WHERE id = $1", product.ID)
+	})
 	if product.ID == 0 {
 		t.Error("expected non-zero ID")
 	}
 	if product.Name != "Repo Test Plant" {
 		t.Errorf("expected name 'Repo Test Plant', got %q", product.Name)
 	}
-	if product.Slug != "repo-test-plant" {
-		t.Errorf("expected slug 'repo-test-plant', got %q", product.Slug)
+	if product.Slug != slug {
+		t.Errorf("expected slug %q, got %q", slug, product.Slug)
 	}
 	if product.Price != 50 {
 		t.Errorf("expected price 50, got %d", product.Price)
@@ -59,19 +67,23 @@ func TestRepositoryCreate(t *testing.T) {
 func TestRepositoryCreateDuplicateSlug(t *testing.T) {
 	repo := newTestRepository(t)
 
-	_, err := repo.Create(context.Background(), CreateProductInput{
+	dupSlug := uniqueSlug("dup-slug")
+	first, err := repo.Create(context.Background(), CreateProductInput{
 		Name:  "First",
-		Slug:  "dup-slug",
+		Slug:  dupSlug,
 		Price: 10,
 		Stock: 1,
 	})
 	if err != nil {
 		t.Fatalf("first Create failed: %v", err)
 	}
+	t.Cleanup(func() {
+		repo.db.Exec(context.Background(), "DELETE FROM products WHERE id = $1", first.ID)
+	})
 
 	_, err = repo.Create(context.Background(), CreateProductInput{
 		Name:  "Second",
-		Slug:  "dup-slug",
+		Slug:  dupSlug,
 		Price: 20,
 		Stock: 2,
 	})
@@ -83,18 +95,24 @@ func TestRepositoryCreateDuplicateSlug(t *testing.T) {
 func TestRepositoryUpdate(t *testing.T) {
 	repo := newTestRepository(t)
 
+	originalSlug := uniqueSlug("original-slug")
+	updatedSlug := uniqueSlug("updated-slug")
+
 	created, err := repo.Create(context.Background(), CreateProductInput{
 		Name:  "Original",
-		Slug:  "original-slug",
+		Slug:  originalSlug,
 		Price: 100,
 		Stock: 5,
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
+	t.Cleanup(func() {
+		repo.db.Exec(context.Background(), "DELETE FROM products WHERE id = $1", created.ID)
+	})
 
 	name := "Updated"
-	slug := "updated-slug"
+	slug := updatedSlug
 	desc := "New description"
 	price := int64(200)
 	stock := 10
@@ -115,8 +133,8 @@ func TestRepositoryUpdate(t *testing.T) {
 	if updated.Name != "Updated" {
 		t.Errorf("expected name 'Updated', got %q", updated.Name)
 	}
-	if updated.Slug != "updated-slug" {
-		t.Errorf("expected slug 'updated-slug', got %q", updated.Slug)
+	if updated.Slug != updatedSlug {
+		t.Errorf("expected slug %q, got %q", updatedSlug, updated.Slug)
 	}
 	if updated.Description != "New description" {
 		t.Errorf("expected description 'New description', got %q", updated.Description)
@@ -150,29 +168,38 @@ func TestRepositoryUpdateNotFound(t *testing.T) {
 func TestRepositoryUpdateDuplicateSlug(t *testing.T) {
 	repo := newTestRepository(t)
 
-	_, err := repo.Create(context.Background(), CreateProductInput{
+	firstSlug := uniqueSlug("first-slug")
+	secondSlug := uniqueSlug("second-slug")
+
+	first, err := repo.Create(context.Background(), CreateProductInput{
 		Name:  "First",
-		Slug:  "first-slug",
+		Slug:  firstSlug,
 		Price: 10,
 		Stock: 1,
 	})
 	if err != nil {
 		t.Fatalf("first Create failed: %v", err)
 	}
+	t.Cleanup(func() {
+		repo.db.Exec(context.Background(), "DELETE FROM products WHERE id = $1", first.ID)
+	})
 
 	second, err := repo.Create(context.Background(), CreateProductInput{
 		Name:  "Second",
-		Slug:  "second-slug",
+		Slug:  secondSlug,
 		Price: 20,
 		Stock: 2,
 	})
 	if err != nil {
 		t.Fatalf("second Create failed: %v", err)
 	}
+	t.Cleanup(func() {
+		repo.db.Exec(context.Background(), "DELETE FROM products WHERE id = $1", second.ID)
+	})
 
 	_, err = repo.Update(context.Background(), second.ID, UpdateProductInput{
 		Name:        strPtr("Second Updated"),
-		Slug:        strPtr("first-slug"),
+		Slug:        strPtr(firstSlug),
 		Description: strPtr("desc"),
 		Price:       int64Ptr(30),
 		Stock:       intPtr(3),
