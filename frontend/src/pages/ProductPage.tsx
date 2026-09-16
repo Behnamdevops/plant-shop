@@ -1,16 +1,22 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getProduct } from '../api/products'
+import { addCartItem } from '../api/cart'
 import type { Product } from '../types/product'
+import { useAuth } from '../hooks/useAuth'
 
 type ProductDetailsProps = {
   slug: string
 }
 
 function ProductDetails({ slug }: ProductDetailsProps) {
+  const { user, loading: authLoading } = useAuth()
   const [product, setProduct] = useState<Product | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [cartMessage, setCartMessage] = useState('')
+  const [cartError, setCartError] = useState('')
+  const [addingToCart, setAddingToCart] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -50,6 +56,21 @@ function ProductDetails({ slug }: ProductDetailsProps) {
     )
   }
 
+  const handleAddToCart = async () => {
+    setCartError('')
+    setCartMessage('')
+    setAddingToCart(true)
+
+    try {
+      await addCartItem(product.id, 1)
+      setCartMessage('Added to cart')
+    } catch (err) {
+      setCartError(err instanceof Error ? err.message : 'Could not add to cart')
+    } finally {
+      setAddingToCart(false)
+    }
+  }
+
   return (
     <main>
       <Link to="/">← Back</Link>
@@ -67,6 +88,30 @@ function ProductDetails({ slug }: ProductDetailsProps) {
       <p>{product.description}</p>
       <p>Price: {product.price}</p>
       <p>Stock: {product.stock}</p>
+
+      {!authLoading && (
+        user ? (
+          <>
+            <button
+              type="button"
+              onClick={handleAddToCart}
+              disabled={product.stock <= 0 || addingToCart}
+            >
+              {product.stock <= 0
+                ? 'Out of stock'
+                : addingToCart
+                  ? 'Adding...'
+                  : 'Add to cart'}
+            </button>
+            {cartMessage && <p role="status">{cartMessage}</p>}
+            {cartError && <p role="alert">{cartError}</p>}
+          </>
+        ) : (
+          <p>
+            <Link to="/login">Log in</Link> to add this product to your cart.
+          </p>
+        )
+      )}
     </main>
   )
 }

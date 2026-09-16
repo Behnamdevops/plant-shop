@@ -17,6 +17,7 @@ export default function Header() {
       </Link>
 
       <nav className="site-header__nav">
+        <Link to="/cart">Cart</Link>
         {loading ? null : user ? (
           <>
             <span className="site-header__user">Hi, {user.name}</span>
