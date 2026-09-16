@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { deleteCartItem, getCart, updateCartItem } from '../api/cart'
+import { createOrder } from '../api/orders'
 import type { Cart } from '../types/cart'
 import { useAuth } from '../hooks/useAuth'
 
 export default function CartPage() {
   const { user, loading: authLoading } = useAuth()
+  const navigate = useNavigate()
   const [cart, setCart] = useState<Cart | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [unauthorized, setUnauthorized] = useState(false)
   const [pendingItemId, setPendingItemId] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [checkingOut, setCheckingOut] = useState(false)
+  const [checkoutError, setCheckoutError] = useState('')
+  const [checkoutMessage, setCheckoutMessage] = useState('')
 
   const reload = () => {
     setLoading(true)
@@ -86,6 +91,35 @@ export default function CartPage() {
       }
     } finally {
       setPendingItemId(null)
+    }
+  }
+
+  const handleCheckout = async () => {
+    setCheckoutError('')
+    setCheckoutMessage('')
+    setCheckingOut(true)
+
+    try {
+      const order = await createOrder()
+      setCheckoutMessage('Order placed successfully')
+      setCart(null)
+      if (order && typeof order.id === 'number') {
+        navigate(`/orders/${order.id}`)
+      } else {
+        navigate('/orders')
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('401')) {
+        setUnauthorized(true)
+      } else if (err instanceof Error && err.message.includes('400')) {
+        setCheckoutError('Your cart is empty.')
+      } else if (err instanceof Error && err.message.includes('409')) {
+        setCheckoutError('One or more items no longer have enough stock.')
+      } else {
+        setCheckoutError(err instanceof Error ? err.message : 'Could not place order')
+      }
+    } finally {
+      setCheckingOut(false)
     }
   }
 
@@ -211,6 +245,15 @@ export default function CartPage() {
       <p>
         <strong>Total: {cart.total}</strong>
       </p>
+
+      {cart.items.length > 0 && (
+        <button type="button" onClick={handleCheckout} disabled={checkingOut}>
+          {checkingOut ? 'Placing order...' : 'Checkout'}
+        </button>
+      )}
+
+      {checkoutMessage && <p role="status">{checkoutMessage}</p>}
+      {checkoutError && <p role="alert">{checkoutError}</p>}
     </main>
   )
 }
