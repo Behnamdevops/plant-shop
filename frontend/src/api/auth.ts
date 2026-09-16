@@ -1,4 +1,5 @@
 import type { User } from '../types/user'
+import { throwApiError } from './errors'
 
 export type AuthCredentials = {
   email: string
@@ -7,11 +8,6 @@ export type AuthCredentials = {
 
 export type RegisterInput = AuthCredentials & {
   name: string
-}
-
-async function readErrorMessage(response: Response): Promise<string> {
-  const text = await response.text()
-  return text.trim() || `Request failed with status ${response.status}`
 }
 
 export async function register(input: RegisterInput): Promise<User> {
@@ -23,7 +19,7 @@ export async function register(input: RegisterInput): Promise<User> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()
@@ -38,7 +34,7 @@ export async function login(input: AuthCredentials): Promise<User> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()
@@ -51,7 +47,7 @@ export async function logout(): Promise<void> {
   })
 
   if (!response.ok && response.status !== 401) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 }
 
@@ -65,7 +61,7 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()

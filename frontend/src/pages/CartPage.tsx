@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { deleteCartItem, getCart, updateCartItem } from '../api/cart'
 import { createOrder } from '../api/orders'
+import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
 import { useAuth } from '../hooks/useAuth'
 
@@ -39,7 +40,7 @@ export default function CartPage() {
       })
       .catch((err) => {
         if (ignore) return
-        if (err instanceof Error && err.message.includes('401')) {
+        if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
           setError(err instanceof Error ? err.message : 'Could not load cart')
@@ -66,7 +67,7 @@ export default function CartPage() {
       await updateCartItem(itemId, quantity)
       reload()
     } catch (err) {
-      if (err instanceof Error && err.message.includes('401')) {
+      if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
         setError(err instanceof Error ? err.message : 'Could not update item')
@@ -84,7 +85,7 @@ export default function CartPage() {
       await deleteCartItem(itemId)
       reload()
     } catch (err) {
-      if (err instanceof Error && err.message.includes('401')) {
+      if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
         setError(err instanceof Error ? err.message : 'Could not remove item')
@@ -109,11 +110,11 @@ export default function CartPage() {
         navigate('/orders')
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('401')) {
+      if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
-      } else if (err instanceof Error && err.message.includes('400')) {
+      } else if (err instanceof ApiError && err.status === 400) {
         setCheckoutError('Your cart is empty.')
-      } else if (err instanceof Error && err.message.includes('409')) {
+      } else if (err instanceof ApiError && err.status === 409) {
         setCheckoutError('One or more items no longer have enough stock.')
       } else {
         setCheckoutError(err instanceof Error ? err.message : 'Could not place order')

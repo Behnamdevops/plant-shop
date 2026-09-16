@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getOrders } from '../api/orders'
+import { ApiError } from '../api/errors'
 import type { OrderSummary } from '../types/order'
 import { useAuth } from '../hooks/useAuth'
 
@@ -33,7 +34,7 @@ export default function OrdersPage() {
       })
       .catch((err) => {
         if (ignore) return
-        if (err instanceof Error && err.message.includes('401')) {
+        if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
           setError(err instanceof Error ? err.message : 'Could not load orders')

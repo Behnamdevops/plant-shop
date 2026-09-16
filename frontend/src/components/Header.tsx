@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { storeConfig } from '../config'
 
 export default function Header() {
   const { user, loading, logout } = useAuth()
@@ -16,7 +17,7 @@ export default function Header() {
         <span className="site-header__brand-icon" aria-hidden="true">
           🌿
         </span>
-        Plant Shop
+        {storeConfig.name}
       </Link>
 
       <nav className="site-header__nav">

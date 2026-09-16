@@ -1,0 +1,94 @@
+# Production compose stack: postgres + backend + frontend.
+#
+# The frontend (nginx) is the only service exposed to the host — it serves
+# the built SPA and reverse-proxies /api/* to the backend by Docker service
+# name, so the browser only ever talks to one origin. Postgres and the
+# backend communicate over the internal compose network only.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Required env vars (put them in a local, untracked .env.prod file — see
+# .env.prod.example): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+#
+# This does not replace docker-compose.yml, which remains the lightweight
+# postgres-only stack used for local development.
+#
+# Uses its own compose project name and volume so it never shares state
+# with the dev-only docker-compose.yml stack (which also runs a postgres
+# container from the same directory) — otherwise both would resolve to the
+# same default "postgres_data" volume and one could initialize the Postgres
+# data directory with credentials the other doesn't expect.
+name: plantshop-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    # No host port mapping: only reachable from other containers on this
+    # compose network. Expose "5432:5432" here only if you need direct host
+    # access (e.g. for psql/migrations) and understand the security tradeoff.
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      APP_ENV: production
+      PORT: 8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    # Not published to the host. The frontend nginx proxy is the only
+    # public entry point; reach the backend directly only for debugging via
+    # `docker compose exec` or a temporary port mapping.
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_STORE_NAME: ${VITE_STORE_NAME:-Plant Shop}
+        VITE_CURRENCY_SYMBOL: ${VITE_CURRENCY_SYMBOL:-$$}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  postgres_data:
+    name: plantshop_prod_postgres_data

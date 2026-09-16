@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getOrder } from '../api/orders'
+import { ApiError } from '../api/errors'
 import type { OrderDetails } from '../types/order'
 import { useAuth } from '../hooks/useAuth'
 
@@ -31,9 +32,9 @@ function OrderDetail({ id }: OrderDetailProps) {
       })
       .catch((err) => {
         if (ignore) return
-        if (err instanceof Error && err.message.includes('401')) {
+        if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
-        } else if (err instanceof Error && err.message.includes('404')) {
+        } else if (err instanceof ApiError && err.status === 404) {
           setNotFound(true)
         } else {
           setError(err instanceof Error ? err.message : 'Could not load order')

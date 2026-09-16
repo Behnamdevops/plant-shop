@@ -1,9 +1,5 @@
 import type { OrderDetails, OrderSummary } from '../types/order'
-
-async function readErrorMessage(response: Response): Promise<string> {
-  const text = await response.text()
-  return text.trim() || `Request failed with status ${response.status}`
-}
+import { throwApiError } from './errors'
 
 export async function createOrder(): Promise<OrderSummary> {
   const response = await fetch('/api/v1/orders', {
@@ -12,7 +8,7 @@ export async function createOrder(): Promise<OrderSummary> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()
@@ -24,7 +20,7 @@ export async function getOrders(): Promise<OrderSummary[]> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()
@@ -36,7 +32,7 @@ export async function getOrder(id: number): Promise<OrderDetails> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    return throwApiError(response)
   }
 
   return response.json()
