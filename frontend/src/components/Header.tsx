@@ -20,6 +20,7 @@ export default function Header() {
         <Link to="/cart">Cart</Link>
         {loading ? null : user ? (
           <>
+            <Link to="/orders">Orders</Link>
             <span className="site-header__user">Hi, {user.name}</span>
             <button type="button" onClick={handleLogout}>
               Log out
