@@ -127,7 +127,7 @@ export default function CartPage() {
     return (
       <main>
         <h1>Your cart</h1>
-        <p>Loading cart...</p>
+        <p className="state-message">Loading cart...</p>
       </main>
     )
   }
@@ -136,7 +136,7 @@ export default function CartPage() {
     return (
       <main>
         <h1>Your cart</h1>
-        <p>
+        <p className="empty-state">
           Please <Link to="/login">log in</Link> to view your cart.
         </p>
       </main>
@@ -147,7 +147,7 @@ export default function CartPage() {
     return (
       <main>
         <h1>Your cart</h1>
-        <p>Loading cart...</p>
+        <p className="state-message">Loading cart...</p>
       </main>
     )
   }
@@ -156,8 +156,10 @@ export default function CartPage() {
     return (
       <main>
         <h1>Your cart</h1>
-        <p role="alert">{error}</p>
-        <button type="button" onClick={reload}>
+        <p className="alert alert-error" role="alert">
+          {error}
+        </p>
+        <button type="button" className="btn btn-secondary" onClick={reload}>
           Retry
         </button>
       </main>
@@ -168,8 +170,9 @@ export default function CartPage() {
     return (
       <main>
         <h1>Your cart</h1>
-        <p>Your cart is empty.</p>
-        <Link to="/">Browse products</Link>
+        <p className="empty-state">
+          Your cart is empty. <Link to="/">Browse products</Link>
+        </p>
       </main>
     )
   }
@@ -178,82 +181,96 @@ export default function CartPage() {
     <main>
       <h1>Your cart</h1>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th>Unit price</th>
-            <th>Quantity</th>
-            <th>Subtotal</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {cart.items.map((item) => (
-            <tr key={item.id}>
-              <td>
-                <Link to={`/products/${item.slug}`}>{item.name}</Link>
-              </td>
-              <td>{item.price}</td>
-              <td>
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                  disabled={pendingItemId === item.id || item.quantity <= 1}
-                  aria-label={`Decrease quantity of ${item.name}`}
-                >
-                  -
-                </button>
-                <input
-                  type="number"
-                  min={1}
-                  value={item.quantity}
-                  disabled={pendingItemId === item.id}
-                  onChange={(event) => {
-                    const value = Number(event.target.value)
-                    if (Number.isFinite(value) && value >= 1) {
-                      handleQuantityChange(item.id, value)
-                    }
-                  }}
-                  aria-label={`Quantity of ${item.name}`}
-                  style={{ width: '3em', textAlign: 'center' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                  disabled={pendingItemId === item.id}
-                  aria-label={`Increase quantity of ${item.name}`}
-                >
-                  +
-                </button>
-              </td>
-              <td>{item.subtotal}</td>
-              <td>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={pendingItemId === item.id}
-                >
-                  Remove
-                </button>
-              </td>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Unit price</th>
+              <th>Quantity</th>
+              <th>Subtotal</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {cart.items.map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <Link to={`/products/${item.slug}`}>{item.name}</Link>
+                </td>
+                <td className="price">{item.price}</td>
+                <td>
+                  <div className="qty-control">
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                      disabled={pendingItemId === item.id || item.quantity <= 1}
+                      aria-label={`Decrease quantity of ${item.name}`}
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={item.quantity}
+                      disabled={pendingItemId === item.id}
+                      onChange={(event) => {
+                        const value = Number(event.target.value)
+                        if (Number.isFinite(value) && value >= 1) {
+                          handleQuantityChange(item.id, value)
+                        }
+                      }}
+                      aria-label={`Quantity of ${item.name}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                      disabled={pendingItemId === item.id}
+                      aria-label={`Increase quantity of ${item.name}`}
+                    >
+                      +
+                    </button>
+                  </div>
+                </td>
+                <td className="price">{item.subtotal}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={() => handleDelete(item.id)}
+                    disabled={pendingItemId === item.id}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-      <p>
-        <strong>Total: {cart.total}</strong>
-      </p>
+      <div className="cart-summary">
+        <span className="cart-summary__total">
+          Total: <span className="price">{cart.total}</span>
+        </span>
 
-      {cart.items.length > 0 && (
-        <button type="button" onClick={handleCheckout} disabled={checkingOut}>
-          {checkingOut ? 'Placing order...' : 'Checkout'}
-        </button>
+        {cart.items.length > 0 && (
+          <button type="button" className="btn btn-primary" onClick={handleCheckout} disabled={checkingOut}>
+            {checkingOut ? 'Placing order...' : 'Checkout'}
+          </button>
+        )}
+      </div>
+
+      {checkoutMessage && (
+        <p className="alert alert-success" role="status">
+          {checkoutMessage}
+        </p>
       )}
-
-      {checkoutMessage && <p role="status">{checkoutMessage}</p>}
-      {checkoutError && <p role="alert">{checkoutError}</p>}
+      {checkoutError && (
+        <p className="alert alert-error" role="alert">
+          {checkoutError}
+        </p>
+      )}
     </main>
   )
 }

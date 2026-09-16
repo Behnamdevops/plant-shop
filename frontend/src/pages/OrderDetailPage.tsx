@@ -52,7 +52,7 @@ function OrderDetail({ id }: OrderDetailProps) {
     return (
       <main>
         <h1>Order details</h1>
-        <p>Loading order...</p>
+        <p className="state-message">Loading order...</p>
       </main>
     )
   }
@@ -61,7 +61,7 @@ function OrderDetail({ id }: OrderDetailProps) {
     return (
       <main>
         <h1>Order details</h1>
-        <p>
+        <p className="empty-state">
           Please <Link to="/login">log in</Link> to view this order.
         </p>
       </main>
@@ -72,7 +72,7 @@ function OrderDetail({ id }: OrderDetailProps) {
     return (
       <main>
         <h1>Order details</h1>
-        <p>Loading order...</p>
+        <p className="state-message">Loading order...</p>
       </main>
     )
   }
@@ -81,8 +81,10 @@ function OrderDetail({ id }: OrderDetailProps) {
     return (
       <main>
         <h1>Order details</h1>
-        <p>Order not found.</p>
-        <Link to="/orders">Back to orders</Link>
+        <p className="empty-state">Order not found.</p>
+        <Link to="/orders" className="back-link">
+          ← Back to orders
+        </Link>
       </main>
     )
   }
@@ -91,50 +93,64 @@ function OrderDetail({ id }: OrderDetailProps) {
     return (
       <main>
         <h1>Order details</h1>
-        <p role="alert">{error || 'Could not load order'}</p>
-        <Link to="/orders">Back to orders</Link>
+        <p className="alert alert-error" role="alert">
+          {error || 'Could not load order'}
+        </p>
+        <Link to="/orders" className="back-link">
+          ← Back to orders
+        </Link>
       </main>
     )
   }
 
   return (
     <main>
-      <Link to="/orders">← Back to orders</Link>
+      <Link to="/orders" className="back-link">
+        ← Back to orders
+      </Link>
 
-      <h1>Order #{order.id}</h1>
-      <p>Status: {order.status}</p>
-      <p>Placed: {new Date(order.created_at).toLocaleString()}</p>
+      <div className="order-card">
+        <div className="order-card__header">
+          <h1>Order #{order.id}</h1>
+          <span className="status-badge">{order.status}</span>
+        </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th>Unit price</th>
-            <th>Quantity</th>
-            <th>Subtotal</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.items.map((item) => (
-            <tr key={item.id}>
-              <td>
-                {item.product_slug ? (
-                  <Link to={`/products/${item.product_slug}`}>{item.product_name}</Link>
-                ) : (
-                  item.product_name
-                )}
-              </td>
-              <td>{item.unit_price}</td>
-              <td>{item.quantity}</td>
-              <td>{item.subtotal}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        <div className="order-card__meta">
+          <span>Placed: {new Date(order.created_at).toLocaleString()}</span>
+          <span>
+            Total: <span className="price">{order.total}</span>
+          </span>
+        </div>
 
-      <p>
-        <strong>Total: {order.total}</strong>
-      </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Unit price</th>
+                <th>Quantity</th>
+                <th>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    {item.product_slug ? (
+                      <Link to={`/products/${item.product_slug}`}>{item.product_name}</Link>
+                    ) : (
+                      item.product_name
+                    )}
+                  </td>
+                  <td className="price">{item.unit_price}</td>
+                  <td>{item.quantity}</td>
+                  <td className="price">{item.subtotal}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   )
 }

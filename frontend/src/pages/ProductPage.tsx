@@ -44,14 +44,22 @@ function ProductDetails({ slug }: ProductDetailsProps) {
   }, [slug])
 
   if (loading) {
-    return <p>Loading product...</p>
+    return (
+      <main>
+        <p className="state-message">Loading product...</p>
+      </main>
+    )
   }
 
   if (error || !product) {
     return (
       <main>
-        <p>{error || 'Product not found'}</p>
-        <Link to="/">Back to products</Link>
+        <p className="alert alert-error" role="alert">
+          {error || 'Product not found'}
+        </p>
+        <Link to="/" className="back-link">
+          ← Back to products
+        </Link>
       </main>
     )
   }
@@ -73,45 +81,69 @@ function ProductDetails({ slug }: ProductDetailsProps) {
 
   return (
     <main>
-      <Link to="/">← Back</Link>
+      <Link to="/" className="back-link">
+        ← Back
+      </Link>
 
-      <h1>{product.name}</h1>
+      <div className="product-detail">
+        <div className="product-detail__media">
+          {product.image_url ? (
+            <img src={product.image_url} alt={product.name} />
+          ) : (
+            <span className="product-detail__media-placeholder" aria-hidden="true">
+              🌱
+            </span>
+          )}
+        </div>
 
-      {product.image_url && (
-        <img
-          src={product.image_url}
-          alt={product.name}
-          width="300"
-        />
-      )}
+        <div className="product-detail__info">
+          <h1>{product.name}</h1>
 
-      <p>{product.description}</p>
-      <p>Price: {product.price}</p>
-      <p>Stock: {product.stock}</p>
+          <div className="product-detail__price-row">
+            <span className="price">{product.price}</span>
+            {product.stock > 0 ? (
+              <span className="badge badge-in-stock">In stock ({product.stock})</span>
+            ) : (
+              <span className="badge badge-out-of-stock">Out of stock</span>
+            )}
+          </div>
 
-      {!authLoading && (
-        user ? (
-          <>
-            <button
-              type="button"
-              onClick={handleAddToCart}
-              disabled={product.stock <= 0 || addingToCart}
-            >
-              {product.stock <= 0
-                ? 'Out of stock'
-                : addingToCart
-                  ? 'Adding...'
-                  : 'Add to cart'}
-            </button>
-            {cartMessage && <p role="status">{cartMessage}</p>}
-            {cartError && <p role="alert">{cartError}</p>}
-          </>
-        ) : (
-          <p>
-            <Link to="/login">Log in</Link> to add this product to your cart.
-          </p>
-        )
-      )}
+          <p className="product-detail__description">{product.description}</p>
+
+          {!authLoading && (
+            user ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleAddToCart}
+                  disabled={product.stock <= 0 || addingToCart}
+                >
+                  {product.stock <= 0
+                    ? 'Out of stock'
+                    : addingToCart
+                      ? 'Adding...'
+                      : 'Add to cart'}
+                </button>
+                {cartMessage && (
+                  <p className="alert alert-success" role="status">
+                    {cartMessage}
+                  </p>
+                )}
+                {cartError && (
+                  <p className="alert alert-error" role="alert">
+                    {cartError}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p>
+                <Link to="/login">Log in</Link> to add this product to your cart.
+              </p>
+            )
+          )}
+        </div>
+      </div>
     </main>
   )
 }
