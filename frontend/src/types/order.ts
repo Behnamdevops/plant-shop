@@ -27,3 +27,38 @@ export type OrderItem = {
 export type OrderDetails = OrderSummary & {
   items: OrderItem[]
 }
+
+// All order statuses supported by the admin order management workflow.
+export const ORDER_STATUSES = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'] as const
+
+export type OrderStatus = (typeof ORDER_STATUSES)[number]
+
+// Allowed next statuses for each current status, mirroring the backend's
+// order.allowedTransitions state machine. Statuses absent as keys
+// (delivered, cancelled) are terminal.
+export const ORDER_STATUS_TRANSITIONS: Record<string, OrderStatus[]> = {
+  pending: ['processing', 'cancelled'],
+  processing: ['shipped', 'cancelled'],
+  shipped: ['delivered'],
+}
+
+// Customer mirrors the backend's order.Customer: a safe, minimal identity
+// snapshot (never includes password hashes or session data).
+export type Customer = {
+  id: number
+  name: string
+  email: string
+}
+
+// AdminOrderSummary mirrors the backend's order.AdminOrder, the response
+// shape for GET /admin/orders. Kept separate from OrderSummary since the
+// customer-facing API never exposes another user's identity.
+export type AdminOrderSummary = OrderSummary & {
+  customer: Customer
+}
+
+// AdminOrderDetails mirrors the backend's order.AdminOrderWithItems, the
+// response payload for GET /admin/orders/{id}.
+export type AdminOrderDetails = AdminOrderSummary & {
+  items: OrderItem[]
+}
