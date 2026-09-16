@@ -94,6 +94,37 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (Product, error
 	return p, err
 }
 
+func (r *Repository) GetByID(ctx context.Context, id int64) (Product, error) {
+	var p Product
+
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			id,
+			name,
+			slug,
+			description,
+			price,
+			stock,
+			image_url,
+			created_at,
+			updated_at
+		FROM products
+		WHERE id = $1
+	`, id).Scan(
+		&p.ID,
+		&p.Name,
+		&p.Slug,
+		&p.Description,
+		&p.Price,
+		&p.Stock,
+		&p.ImageURL,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+
+	return p, err
+}
+
 func (r *Repository) Create(ctx context.Context, input CreateProductInput) (Product, error) {
 	var p Product
 	err := r.db.QueryRow(ctx, `
@@ -119,6 +150,27 @@ func (r *Repository) Create(ctx context.Context, input CreateProductInput) (Prod
 		return Product{}, err
 	}
 	return p, nil
+}
+
+// Delete removes a product by ID. cart_items reference products with
+// ON DELETE CASCADE, so any in-progress carts referencing this product are
+// cleaned up automatically. order_items has no ON DELETE clause (defaults to
+// RESTRICT), so if this product was ever part of a placed order, Postgres
+// rejects the delete with a foreign-key violation (23503) — this is mapped
+// to ErrProductReferenced so historical order data is never lost.
+func (r *Repository) Delete(ctx context.Context, id int64) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM products WHERE id = $1`, id)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrProductReferenced
+		}
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Repository) Update(ctx context.Context, id int64, input UpdateProductInput) (Product, error) {

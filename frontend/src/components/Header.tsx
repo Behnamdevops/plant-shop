@@ -24,6 +24,7 @@ export default function Header() {
         {loading ? null : user ? (
           <>
             <Link to="/orders">Orders</Link>
+            {user.role === 'admin' && <Link to="/admin/products">Admin</Link>}
             <span className="site-header__user">Hi, {user.name}</span>
             <button type="button" className="btn btn-secondary btn-sm" onClick={handleLogout}>
               Log out

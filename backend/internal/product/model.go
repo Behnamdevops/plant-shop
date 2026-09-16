@@ -35,4 +35,10 @@ type UpdateProductInput struct {
 	ImageURL    *string `json:"image_url"`
 }
 
-var ErrDuplicateSlug = errors.New("duplicate slug")
+var (
+	ErrDuplicateSlug = errors.New("duplicate slug")
+	// ErrProductReferenced is returned when a product cannot be deleted
+	// because it is still referenced by historical data (e.g. order_items),
+	// which must never be silently cascade-deleted.
+	ErrProductReferenced = errors.New("product is referenced by existing orders")
+)

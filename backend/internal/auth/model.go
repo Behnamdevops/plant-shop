@@ -10,8 +10,20 @@ type User struct {
 	Name         string    `json:"name"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
+
+// IsAdmin reports whether the user has the admin role. Role is always
+// determined from the database row, never from client-supplied input.
+func (u User) IsAdmin() bool {
+	return u.Role == RoleAdmin
 }
 
 type Session struct {
@@ -37,4 +49,5 @@ var (
 	ErrDuplicateEmail     = errors.New("duplicate email")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUnauthenticated    = errors.New("unauthenticated")
+	ErrForbidden          = errors.New("forbidden")
 )

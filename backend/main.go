@@ -30,11 +30,11 @@ func main() {
 		log.Fatal("cannot connect to database: ", err)
 	}
 
-	productRepository := product.NewRepository(db)
-	productHandler := product.NewHandler(productRepository)
-
 	authRepository := auth.NewRepository(db)
 	authHandler := auth.NewHandler(authRepository)
+
+	productRepository := product.NewRepository(db)
+	productHandler := product.NewHandler(productRepository, authHandler)
 
 	cartRepository := cart.NewRepository(db)
 	cartHandler := cart.NewHandler(cartRepository, authHandler)
@@ -61,7 +61,9 @@ func main() {
 	mux.HandleFunc("GET /api/v1/products", productHandler.List)
 	mux.HandleFunc("GET /api/v1/products/{slug}", productHandler.GetBySlug)
 	mux.HandleFunc("POST /api/v1/admin/products", productHandler.Create)
+	mux.HandleFunc("GET /api/v1/admin/products/{id}", productHandler.GetByID)
 	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
+	mux.HandleFunc("DELETE /api/v1/admin/products/{id}", productHandler.Delete)
 
 	mux.HandleFunc("GET /api/v1/cart", cartHandler.GetCart)
 	mux.HandleFunc("POST /api/v1/cart/items", cartHandler.AddItem)

@@ -22,9 +22,9 @@ func (r *Repository) CreateUser(ctx context.Context, name, email, passwordHash s
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO users (name, email, password_hash)
 		VALUES ($1, $2, $3)
-		RETURNING id, name, email, password_hash, created_at, updated_at
+		RETURNING id, name, email, password_hash, role, created_at, updated_at
 	`, name, email, passwordHash).Scan(
-		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -39,11 +39,11 @@ func (r *Repository) CreateUser(ctx context.Context, name, email, passwordHash s
 func (r *Repository) FindUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, email, password_hash, created_at, updated_at
+		SELECT id, name, email, password_hash, role, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`, email).Scan(
-		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt,
 	)
 	return u, err
 }
@@ -51,11 +51,11 @@ func (r *Repository) FindUserByEmail(ctx context.Context, email string) (User, e
 func (r *Repository) FindUserByID(ctx context.Context, id int64) (User, error) {
 	var u User
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, email, password_hash, created_at, updated_at
+		SELECT id, name, email, password_hash, role, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`, id).Scan(
-		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt,
 	)
 	return u, err
 }
