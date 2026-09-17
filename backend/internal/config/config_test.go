@@ -1,10 +1,26 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestProductionFrontendHealthcheckUsesIPv4Listener(t *testing.T) {
+	compose, err := os.ReadFile("../../../docker-compose.prod.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, frontend, ok := strings.Cut(string(compose), "\n  frontend:")
+	if !ok {
+		t.Fatal("frontend service missing")
+	}
+	frontend, _, _ = strings.Cut(frontend, "\nnetworks:")
+	if !strings.Contains(frontend, `test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80"]`) {
+		t.Fatal("frontend healthcheck must target the nginx IPv4 listener explicitly")
+	}
+}
 
 func values() map[string]string {
 	return map[string]string{"DATABASE_URL": "postgres://user:unit-only-password@localhost/shop_test", "APP_ENV": "production", "FRONTEND_BASE_URL": "https://shop.plants.tld"}

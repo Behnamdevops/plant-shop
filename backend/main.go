@@ -95,8 +95,9 @@ func run() error {
 	mux.HandleFunc("GET /healthz", operational.Health)
 	mux.HandleFunc("GET /readyz", operational.Ready(db.Ping))
 
+	trustedProxy := operational.TrustedProxy(os.Getenv("TRUSTED_PROXY_HOST"))
 	limited := func(handler http.HandlerFunc) http.Handler {
-		return operational.RateLimit(30, time.Minute, handler)
+		return operational.RateLimit(30, time.Minute, handler, trustedProxy)
 	}
 
 	mux.Handle("POST /api/v1/auth/register", limited(authHandler.Register))
@@ -126,7 +127,7 @@ func run() error {
 	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
 
 	mux.Handle("POST /api/v1/orders/{id}/payments/zarinpal", limited(paymentHandler.RequestZarinPal))
-	mux.Handle("GET /api/v1/payments/zarinpal/callback", operational.RateLimit(120, time.Minute, http.HandlerFunc(paymentHandler.Callback)))
+	mux.Handle("GET /api/v1/payments/zarinpal/callback", operational.RateLimit(120, time.Minute, http.HandlerFunc(paymentHandler.Callback), trustedProxy))
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
 	mux.HandleFunc("GET /api/v1/admin/payments/reconciliation", paymentHandler.AdminListReconciliations)
 	mux.Handle("POST /api/v1/admin/payments/{id}/reconcile", limited(paymentHandler.AdminReconcile))
