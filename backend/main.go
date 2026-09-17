@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,47 +12,57 @@ import (
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
+	"github.com/Behnamdevops/plant-shop/backend/internal/config"
+	"github.com/Behnamdevops/plant-shop/backend/internal/migrate"
+	"github.com/Behnamdevops/plant-shop/backend/internal/operational"
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
 	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// appEnv values. "production" enables production-only safety behavior
-// (currently: Secure session cookies). Anything else is treated as
-// development, which keeps the existing local-HTTP-friendly behavior.
-const appEnvProduction = "production"
-
 func main() {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL is not set")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	if err := run(); err != nil {
+		slog.Error("server failed", "error", err.Error())
+		os.Exit(1)
 	}
+}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "" {
-		appEnv = "development"
-	}
-	isProduction := appEnv == appEnvProduction
-
-	paymentConfig, err := payment.LoadConfig(os.Getenv)
+func run() error {
+	cfg, err := config.Load(os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-
-	db, err := pgxpool.New(context.Background(), databaseURL)
+	port, appEnv := cfg.Port, cfg.Environment
+	isProduction := appEnv == "production"
+	paymentConfig := cfg.Payment
+	if isProduction {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		migrations, err := migrate.Load(os.DirFS("migrations"))
+		if err != nil {
+			return err
+		}
+		conn, err := migrate.Connect(ctx, os.Getenv("DATABASE_URL"))
+		if err != nil {
+			return err
+		}
+		err = migrate.Run(ctx, conn, migrations)
+		conn.Close(context.Background())
+		if err != nil {
+			return err
+		}
+	}
+	db, err := pgxpool.NewWithConfig(context.Background(), cfg.Pool)
 	if err != nil {
-		log.Fatal(err)
+		return errors.New("cannot initialize database pool")
 	}
 	defer db.Close()
-
-	if err := db.Ping(context.Background()); err != nil {
-		log.Fatal("cannot connect to database: ", err)
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer startupCancel()
+	if err := db.Ping(startupCtx); err != nil {
+		return errors.New("cannot connect to database")
 	}
 
 	authRepository := auth.NewRepository(db)
@@ -82,17 +91,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	mux.HandleFunc("GET /health", operational.Health)
+	mux.HandleFunc("GET /healthz", operational.Health)
+	mux.HandleFunc("GET /readyz", operational.Ready(db.Ping))
 
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":   "ok",
-			"database": "connected",
-		})
-	})
+	limited := func(handler http.HandlerFunc) http.Handler {
+		return operational.RateLimit(30, time.Minute, handler)
+	}
 
-	mux.HandleFunc("POST /api/v1/auth/register", authHandler.Register)
-	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	mux.Handle("POST /api/v1/auth/register", limited(authHandler.Register))
+	mux.Handle("POST /api/v1/auth/login", limited(authHandler.Login))
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
 	mux.HandleFunc("GET /api/v1/me", authHandler.Me)
 
@@ -117,18 +125,18 @@ func main() {
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
 	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
 
-	mux.HandleFunc("POST /api/v1/orders/{id}/payments/zarinpal", paymentHandler.RequestZarinPal)
-	mux.HandleFunc("GET /api/v1/payments/zarinpal/callback", paymentHandler.Callback)
+	mux.Handle("POST /api/v1/orders/{id}/payments/zarinpal", limited(paymentHandler.RequestZarinPal))
+	mux.Handle("GET /api/v1/payments/zarinpal/callback", operational.RateLimit(120, time.Minute, http.HandlerFunc(paymentHandler.Callback)))
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
 	mux.HandleFunc("GET /api/v1/admin/payments/reconciliation", paymentHandler.AdminListReconciliations)
-	mux.HandleFunc("POST /api/v1/admin/payments/{id}/reconcile", paymentHandler.AdminReconcile)
+	mux.Handle("POST /api/v1/admin/payments/{id}/reconcile", limited(paymentHandler.AdminReconcile))
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           operational.Logging(slog.Default(), mux),
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -137,7 +145,7 @@ func main() {
 	// killing the process mid-request.
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("server running on :%s (env=%s)", port, appEnv)
+		slog.Info("server starting", "port", port, "environment", appEnv)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
@@ -150,20 +158,21 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != nil {
-			log.Fatal(err)
+			return errors.New("HTTP server failed")
 		}
 	case <-ctx.Done():
 		stop()
-		log.Println("shutdown signal received, draining connections...")
+		slog.Info("shutdown signal received, draining connections")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Println("graceful shutdown failed, forcing close: ", err)
+			slog.Error("graceful shutdown timed out, forcing close")
 			srv.Close()
 		}
 	}
 
-	log.Println("server stopped")
+	slog.Info("server stopped")
+	return nil
 }
