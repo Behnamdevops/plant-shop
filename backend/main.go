@@ -120,6 +120,8 @@ func main() {
 	mux.HandleFunc("POST /api/v1/orders/{id}/payments/zarinpal", paymentHandler.RequestZarinPal)
 	mux.HandleFunc("GET /api/v1/payments/zarinpal/callback", paymentHandler.Callback)
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
+	mux.HandleFunc("GET /api/v1/admin/payments/reconciliation", paymentHandler.AdminListReconciliations)
+	mux.HandleFunc("POST /api/v1/admin/payments/{id}/reconcile", paymentHandler.AdminReconcile)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

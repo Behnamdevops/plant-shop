@@ -289,6 +289,88 @@ func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority stri
 	return VerifyResult{OrderID: a.OrderID, FinalStatus: status}, nil
 }
 
+func (r *Repository) reconciliationRows(ctx context.Context, attemptID, beforeID int64, limit int) ([]Reconciliation, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT a.id, a.order_id, a.provider, a.currency, a.environment, a.account_key,
+		       a.authority, a.amount, a.status, a.ref_id, a.provider_code,
+		       a.created_at, a.updated_at, a.verified_at, o.status, o.payment_status,
+		       COALESCE(e.event_type, ''), e.created_at
+		FROM payment_attempts a JOIN orders o ON o.id = a.order_id
+		LEFT JOIN LATERAL (
+			SELECT event_type, created_at FROM payment_attempt_events
+			WHERE attempt_id = a.id AND event_type IN ('paid', 'reconciliation', 'verify_rejected', 'verify_uncertain')
+			ORDER BY id DESC LIMIT 1
+		) e ON true
+		WHERE ($1::bigint = 0 OR a.id = $1)
+		  AND ($2::bigint = 0 OR a.id < $2)
+		  AND ($1::bigint <> 0 OR a.status IN ('pending', 'reconciliation') OR (a.status = 'failed' AND a.authority IS NOT NULL))
+		ORDER BY a.id DESC LIMIT $3
+	`, attemptID, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Reconciliation, 0)
+	for rows.Next() {
+		var item Reconciliation
+		a := &item.Attempt
+		var event string
+		if err := rows.Scan(&a.ID, &a.OrderID, &a.Provider, &a.Currency, &a.Environment, &a.AccountKey,
+			&a.Authority, &a.Amount, &a.Status, &a.RefID, &a.ProviderCode,
+			&a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt, &item.OrderStatus, &item.PaymentStatus,
+			&event, &item.LastCheckedAt); err != nil {
+			return nil, err
+		}
+		switch event {
+		case "paid":
+			item.LastOutcome = "verified_success"
+		case "reconciliation":
+			item.LastOutcome = "manual_required"
+		case "verify_rejected":
+			item.LastOutcome = "definitive_rejection"
+		case "verify_uncertain":
+			item.LastOutcome = "uncertain"
+		}
+		item.ReconciliationRequired = a.Status != StatusPaid
+		item.Reason = "awaiting_verification"
+		switch {
+		case a.Status == StatusPaid:
+			item.Reason = "settled"
+		case a.Status == StatusReconciliation:
+			item.Reason = "manual_reconciliation_required"
+			if item.OrderStatus == "cancelled" || item.PaymentStatus == "paid" || item.PaymentStatus == "refunded" {
+				item.Reason = "refund_required"
+			}
+		case !r.matchesProvider(*a):
+			item.Reason = "provider_binding_mismatch"
+		case a.Authority == nil:
+			item.Reason = "missing_authority"
+		case a.Currency != "IRR" || a.Amount < 10000 || len(*a.Authority) > 64 || !validAuthority(*a.Authority):
+			item.Reason = "invalid_binding"
+		default:
+			item.Retryable = true
+			if event == "verify_rejected" {
+				item.Reason = "verification_rejected"
+			} else if event == "verify_uncertain" {
+				item.Reason = "verification_uncertain"
+			}
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) GetReconciliation(ctx context.Context, attemptID int64) (Reconciliation, error) {
+	items, err := r.reconciliationRows(ctx, attemptID, 0, 1)
+	if err != nil {
+		return Reconciliation{}, err
+	}
+	if len(items) == 0 {
+		return Reconciliation{}, ErrAttemptNotFound
+	}
+	return items[0], nil
+}
+
 func (r *Repository) ListAttemptsForOrder(ctx context.Context, orderID int64) ([]Attempt, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE order_id = $1 ORDER BY id DESC`, orderID)
 	if err != nil {

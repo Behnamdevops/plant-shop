@@ -502,12 +502,20 @@ func TestRepositoryPaymentCancellation(t *testing.T) {
 							}
 							wantStatus, wantStock = status, 7
 						}
-						if err := cancel(); !errors.Is(err, wantErr) {
-							t.Fatalf("cancel error = %v, want %v", err, wantErr)
-						}
-						if !tc.blocked {
-							if err := cancel(); !errors.Is(err, ErrInvalidTransition) {
-								t.Fatalf("second cancel error = %v, want %v", err, ErrInvalidTransition)
+						for attempt := 0; attempt < 2; attempt++ {
+							err := cancel()
+							if !errors.Is(err, wantErr) {
+								t.Fatalf("cancel error = %v, want %v", err, wantErr)
+							}
+							wantRefundRequired := admin && tc.paymentStatus == PaymentStatusPaid
+							if errors.Is(err, ErrRefundRequired) != wantRefundRequired {
+								t.Fatalf("cancel error = %v, want refund required = %t", err, wantRefundRequired)
+							}
+							if wantRefundRequired && !strings.Contains(err.Error(), "refund or manual reconciliation required") {
+								t.Fatalf("missing refund guidance: %v", err)
+							}
+							if !tc.blocked {
+								wantErr = ErrInvalidTransition
 							}
 						}
 						got, err := env.orderRepo.GetByIDForUser(t.Context(), userID, o.ID)
@@ -523,6 +531,52 @@ func TestRepositoryPaymentCancellation(t *testing.T) {
 					})
 				}
 			}
+		}
+	}
+}
+
+func TestRepositoryAdminCancellationTerminalStates(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.db.Close()
+	for _, status := range []string{StatusShipped, StatusDelivered, StatusCancelled} {
+		for _, paymentStatus := range []string{PaymentStatusPending, PaymentStatusPaid} {
+			t.Run(status+"/"+paymentStatus, func(t *testing.T) {
+				userID := env.createUser(t)
+				p := env.createProduct(t, 10)
+				if _, err := env.cartRepo.AddItem(t.Context(), userID, p.ID, 3); err != nil {
+					t.Fatal(err)
+				}
+				o, err := env.orderRepo.CreateFromCart(t.Context(), userID, validCheckoutInput())
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantStock := 7
+				if status == StatusCancelled {
+					if _, err := env.orderRepo.UpdateStatus(t.Context(), o.ID, StatusCancelled); err != nil {
+						t.Fatal(err)
+					}
+					wantStock = 10
+				}
+				if _, err := env.db.Exec(t.Context(), `UPDATE orders SET status = $2, payment_status = $3 WHERE id = $1`, o.ID, status, paymentStatus); err != nil {
+					t.Fatal(err)
+				}
+				for attempt := 0; attempt < 2; attempt++ {
+					_, err := env.orderRepo.UpdateStatus(t.Context(), o.ID, StatusCancelled)
+					if !errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrRefundRequired) {
+						t.Fatalf("terminal cancellation error = %v, want only ErrInvalidTransition", err)
+					}
+					got, err := env.orderRepo.GetByID(t.Context(), o.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got.Status != status || got.PaymentStatus != paymentStatus {
+						t.Fatalf("terminal order changed: %s/%s", got.Status, got.PaymentStatus)
+					}
+					if stock := env.getStock(t, p.ID); stock != wantStock {
+						t.Fatalf("stock = %d, want %d", stock, wantStock)
+					}
+				}
+			})
 		}
 	}
 }

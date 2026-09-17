@@ -5,6 +5,7 @@ import Header from './components/Header'
 import { AuthProvider } from './context/AuthProvider'
 import AdminOrderDetailPage from './pages/admin/AdminOrderDetailPage'
 import AdminOrdersPage from './pages/admin/AdminOrdersPage'
+import AdminPaymentReconciliationPage from './pages/admin/AdminPaymentReconciliationPage'
 import AdminProductCreatePage from './pages/admin/AdminProductCreatePage'
 import AdminProductEditPage from './pages/admin/AdminProductEditPage'
 import AdminProductsPage from './pages/admin/AdminProductsPage'
@@ -55,6 +56,14 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminProductEditPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/payments/reconciliation"
+              element={
+                <AdminRoute>
+                  <AdminPaymentReconciliationPage />
                 </AdminRoute>
               }
             />

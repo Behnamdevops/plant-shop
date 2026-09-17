@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+type Reconciliation struct {
+	Attempt
+	OrderStatus            string     `json:"order_status"`
+	PaymentStatus          string     `json:"payment_status"`
+	ReconciliationRequired bool       `json:"reconciliation_required"`
+	Reason                 string     `json:"reason"`
+	Retryable              bool       `json:"retryable"`
+	LastOutcome            string     `json:"last_outcome"`
+	LastCheckedAt          *time.Time `json:"last_checked_at"`
+}
+
 // Attempt is a row in the payment_attempts table: one ZarinPal payment
 // attempt for a single order. An order may have several attempts over time
 // (e.g. an abandoned or failed attempt followed by a retry); the current
