@@ -53,6 +53,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       APP_ENV: production
+      TRUSTED_PROXY_HOST: frontend
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
       PORT: 8080
       ZARINPAL_MERCHANT_ID: ${ZARINPAL_MERCHANT_ID:-}
@@ -88,7 +89,7 @@ services:
     ports:
       - "${FRONTEND_PORT:-8081}:80"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80"]
       interval: 10s
       timeout: 5s
       retries: 5
