@@ -21,6 +21,9 @@ type Attempt struct {
 	ID           int64      `json:"id"`
 	OrderID      int64      `json:"order_id"`
 	Provider     string     `json:"provider"`
+	Currency     string     `json:"currency"`
+	Environment  string     `json:"environment"`
+	AccountKey   string     `json:"-"`
 	Authority    *string    `json:"authority"`
 	Amount       int64      `json:"amount"`
 	Status       string     `json:"status"`
@@ -42,12 +45,18 @@ const ProviderZarinPal = "zarinpal"
 // conclusively not going to succeed (failed — covers both "the payment/
 // request call itself failed" and "verification failed/was rejected").
 const (
-	StatusPending = "pending"
-	StatusPaid    = "paid"
-	StatusFailed  = "failed"
+	StatusPending        = "pending"
+	StatusPaid           = "paid"
+	StatusFailed         = "failed"
+	StatusReconciliation = "reconciliation"
 )
 
 var (
+	ErrPaymentInProgress   = errors.New("payment is in progress")
+	ErrProviderMismatch    = errors.New("payment provider binding mismatch")
+	ErrInvalidAuthority    = errors.New("invalid payment authority")
+	ErrInvalidVerification = errors.New("invalid payment verification")
+
 	// ErrOrderNotFound is returned when the referenced order does not
 	// exist or does not belong to the requesting user.
 	ErrOrderNotFound = errors.New("order not found")

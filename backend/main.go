@@ -41,6 +41,11 @@ func main() {
 	}
 	isProduction := appEnv == appEnvProduction
 
+	paymentConfig, err := payment.LoadConfig(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	db, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatal(err)
@@ -68,22 +73,12 @@ func main() {
 	orderRepository := order.NewRepository(db)
 	orderHandler := order.NewHandler(orderRepository, authHandler)
 
-	// ZarinPal Payment V1. ZARINPAL_MERCHANT_ID and ZARINPAL_CALLBACK_URL
-	// are required to accept real payments; if unset the payment endpoints
-	// are still registered (so the rest of the app keeps working) but any
-	// request to them will fail at the ZarinPal API call itself with a
-	// clear provider error, since an empty merchant_id is always rejected
-	// by ZarinPal. ZARINPAL_SANDBOX=true switches to ZarinPal's sandbox
-	// host for testing without moving real money.
-	zarinpalMerchantID := os.Getenv("ZARINPAL_MERCHANT_ID")
-	zarinpalCallbackURL := os.Getenv("ZARINPAL_CALLBACK_URL")
-	zarinpalSandbox := os.Getenv("ZARINPAL_SANDBOX") == "true"
-	if zarinpalMerchantID == "" || zarinpalCallbackURL == "" {
-		log.Println("warning: ZARINPAL_MERCHANT_ID or ZARINPAL_CALLBACK_URL is not set; ZarinPal payments will fail until configured")
+	var zarinpalClient payment.Client
+	if paymentConfig.Enabled {
+		zarinpalClient = payment.NewZarinPalClient(paymentConfig.MerchantID, paymentConfig.Sandbox)
 	}
-	zarinpalClient := payment.NewZarinPalClient(zarinpalMerchantID, zarinpalSandbox)
 	paymentRepository := payment.NewRepository(db)
-	paymentHandler := payment.NewHandler(paymentRepository, authHandler, zarinpalClient, zarinpalCallbackURL)
+	paymentHandler := payment.NewHandler(paymentRepository, authHandler, zarinpalClient, paymentConfig.CallbackURL, paymentConfig.FrontendBaseURL)
 
 	mux := http.NewServeMux()
 

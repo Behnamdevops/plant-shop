@@ -417,6 +417,116 @@ func TestCheckoutInputValidateAcceptsValidInput(t *testing.T) {
 	}
 }
 
+func TestRepositoryPaymentCancellation(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.db.Close()
+
+	cases := []struct {
+		name          string
+		paymentStatus string
+		attemptStatus string
+		authority     bool
+		blocked       bool
+	}{
+		{"no attempts", PaymentStatusPending, "", false, false},
+		{"paid order", PaymentStatusPaid, "", false, true},
+		{"refunded order", PaymentStatusRefunded, "", false, true},
+		{"pending request", PaymentStatusPending, "pending", false, true},
+		{"pending authority", PaymentStatusPending, "pending", true, true},
+		{"paid attempt", PaymentStatusPending, "paid", true, true},
+		{"reconciliation authority", PaymentStatusPending, "reconciliation", true, true},
+		{"failed legacy authority", PaymentStatusFailed, "failed", true, true},
+		{"failed request", PaymentStatusFailed, "failed", false, false},
+	}
+
+	for _, admin := range []bool{false, true} {
+		for _, status := range []string{StatusPending, StatusProcessing} {
+			for _, method := range []string{PaymentMethodManual, PaymentMethodZarinPal} {
+				for _, tc := range cases {
+					t.Run(fmt.Sprintf("admin=%t/%s/%s/%s", admin, status, method, tc.name), func(t *testing.T) {
+						userID := env.createUser(t)
+						p := env.createProduct(t, 10)
+						if _, err := env.cartRepo.AddItem(t.Context(), userID, p.ID, 3); err != nil {
+							t.Fatalf("AddItem failed: %v", err)
+						}
+						o, err := env.orderRepo.CreateFromCart(t.Context(), userID, validCheckoutInput())
+						if err != nil {
+							t.Fatalf("CreateFromCart failed: %v", err)
+						}
+						if _, err := env.db.Exec(t.Context(), `
+							UPDATE orders SET status = $2, payment_status = $3, payment_method = $4 WHERE id = $1
+						`, o.ID, status, tc.paymentStatus, method); err != nil {
+							t.Fatalf("set order payment state: %v", err)
+						}
+						if tc.attemptStatus != "" {
+							var authority *string
+							var refID *int64
+							var code *int
+							if tc.authority {
+								value := "authority-" + uniqueSuffix()
+								authority = &value
+							}
+							if tc.attemptStatus == "paid" || tc.attemptStatus == "reconciliation" {
+								id := o.ID
+								refID = &id
+								code = func() *int { v := 100; return &v }()
+							}
+							if _, err := env.db.Exec(t.Context(), `
+								INSERT INTO payment_attempts (order_id, amount, status, authority, ref_id, provider_code, verified_at)
+								VALUES ($1, $2, $3, $4, $5, $6,
+									CASE WHEN $5::bigint IS NULL THEN NULL ELSE NOW() END)
+							`, o.ID, o.Total, tc.attemptStatus, authority, refID, code); err != nil {
+								t.Fatalf("insert payment attempt: %v", err)
+							}
+							if _, err := env.db.Exec(t.Context(), `
+								INSERT INTO payment_attempts (order_id, amount, status) VALUES ($1, $2, 'failed')
+							`, o.ID, o.Total); err != nil {
+								t.Fatalf("insert later failed request: %v", err)
+							}
+						}
+
+						cancel := func() error {
+							if admin {
+								_, err := env.orderRepo.UpdateStatus(t.Context(), o.ID, StatusCancelled)
+								return err
+							}
+							_, err := env.orderRepo.CancelOwnOrder(t.Context(), userID, o.ID)
+							return err
+						}
+						var wantErr error
+						wantStatus, wantStock := StatusCancelled, 10
+						if tc.blocked {
+							wantErr = ErrOrderNotEligibleForCancel
+							if admin {
+								wantErr = ErrInvalidTransition
+							}
+							wantStatus, wantStock = status, 7
+						}
+						if err := cancel(); !errors.Is(err, wantErr) {
+							t.Fatalf("cancel error = %v, want %v", err, wantErr)
+						}
+						if !tc.blocked {
+							if err := cancel(); !errors.Is(err, ErrInvalidTransition) {
+								t.Fatalf("second cancel error = %v, want %v", err, ErrInvalidTransition)
+							}
+						}
+						got, err := env.orderRepo.GetByIDForUser(t.Context(), userID, o.ID)
+						if err != nil {
+							t.Fatalf("GetByIDForUser failed: %v", err)
+						}
+						if got.Status != wantStatus || got.PaymentStatus != tc.paymentStatus || got.PaymentMethod != method {
+							t.Fatalf("unexpected order state: status=%s payment_status=%s payment_method=%s", got.Status, got.PaymentStatus, got.PaymentMethod)
+						}
+						if stock := env.getStock(t, p.ID); stock != wantStock {
+							t.Fatalf("stock = %d, want %d", stock, wantStock)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestCheckoutInputValidateRejectsFieldTooLong(t *testing.T) {
 	in := validCheckoutInput()
 	in.RecipientName = strings.Repeat("a", maxRecipientNameLen+1)

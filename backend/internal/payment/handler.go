@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 )
@@ -26,16 +28,11 @@ type authenticator interface {
 // Handler wires the payment_attempts repository and a ZarinPal Client
 // together into HTTP handlers.
 type Handler struct {
-	repository  *Repository
-	auth        authenticator
-	client      Client
-	merchantID  string
-	callbackURL string
-	// resultBaseURL is where the browser is redirected after the callback
-	// finishes processing, e.g. "/payment/result" (relative — resolved
-	// against whatever origin served the frontend, since the backend is
-	// only ever reached through the same origin/reverse proxy in this
-	// project; see docker-compose.prod.yml).
+	repository    *Repository
+	auth          authenticator
+	client        Client
+	merchantID    string
+	callbackURL   string
 	resultBaseURL string
 }
 
@@ -44,13 +41,19 @@ type Handler struct {
 // to after the gateway flow completes (see ZARINPAL_CALLBACK_URL in
 // backend/.env.example) — it must point at this backend's
 // /api/v1/payments/zarinpal/callback route.
-func NewHandler(repository *Repository, authHandler *auth.Handler, client Client, callbackURL string) *Handler {
+func NewHandler(repository *Repository, authHandler *auth.Handler, client Client, callbackURL, frontendBaseURL string) *Handler {
+	if configured, ok := client.(interface {
+		Environment() string
+		Identity() string
+	}); ok {
+		repository.ConfigureProvider(configured.Environment(), configured.Identity())
+	}
 	return &Handler{
 		repository:    repository,
 		auth:          authHandler,
 		client:        client,
 		callbackURL:   callbackURL,
-		resultBaseURL: "/payment/result",
+		resultBaseURL: frontendBaseURL + "/payment/result",
 	}
 }
 
@@ -59,6 +62,10 @@ func NewHandler(repository *Repository, authHandler *auth.Handler, client Client
 // order's owner may call this; the amount charged is always the order's
 // persisted total, never anything supplied by the client.
 func (h *Handler) RequestZarinPal(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		http.Error(w, "payments are disabled", http.StatusServiceUnavailable)
+		return
+	}
 	userID, err := h.auth.Authenticate(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -81,6 +88,8 @@ func (h *Handler) RequestZarinPal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "order is already paid", http.StatusConflict)
 		case errors.Is(err, ErrOrderNotPayable):
 			http.Error(w, "order is not payable", http.StatusConflict)
+		case errors.Is(err, ErrPaymentInProgress):
+			http.Error(w, "payment is unresolved; retry verification of the existing payment", http.StatusConflict)
 		default:
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
@@ -92,6 +101,8 @@ func (h *Handler) RequestZarinPal(w http.ResponseWriter, r *http.Request) {
 		Description: fmt.Sprintf("Order #%d", attempt.OrderID),
 		CallbackURL: h.callbackURL,
 	})
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
 	if err != nil {
 		// The attempt row already exists (status "pending", no authority).
 		// Mark it failed so it's not left in limbo; the customer can
@@ -101,14 +112,23 @@ func (h *Handler) RequestZarinPal(w http.ResponseWriter, r *http.Request) {
 		// body itself, so logging err here is safe, but we still avoid
 		// logging the raw response body.
 		log.Printf("payment: zarinpal request failed for order %d: %v", attempt.OrderID, err)
-		if markErr := h.repository.MarkAttemptFailed(r.Context(), attempt.ID, nil); markErr != nil {
+		var code *int
+		var rejection *ProviderError
+		if errors.As(err, &rejection) {
+			code = &rejection.Code
+		}
+		if markErr := h.repository.MarkAttemptFailed(persistCtx, attempt.ID, code); markErr != nil {
 			log.Printf("payment: failed to mark attempt %d failed: %v", attempt.ID, markErr)
 		}
 		http.Error(w, "payment provider is currently unavailable, please try again", http.StatusServiceUnavailable)
 		return
 	}
 
-	if err := h.repository.SetAuthority(r.Context(), attempt.ID, out.Authority); err != nil {
+	if out.Code != codeSuccess || len(out.Authority) > 64 || !validAuthority(out.Authority) || out.RedirectURL == "" {
+		http.Error(w, "invalid payment provider response", http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.repository.SetAuthority(persistCtx, attempt.ID, out.Authority); err != nil {
 		log.Printf("payment: failed to persist authority for attempt %d: %v", attempt.ID, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -146,15 +166,15 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if attempt.Status == StatusPaid {
+		h.redirectResult(w, r, attempt.OrderID, "success")
+		return
+	}
+	if h.client == nil || !h.repository.matchesProvider(attempt) || attempt.Currency != "IRR" || attempt.Status == StatusReconciliation {
+		h.redirectResult(w, r, attempt.OrderID, "unknown")
+		return
+	}
 	if status != "OK" {
-		// ZarinPal reports the customer cancelled or the gateway declined
-		// before any charge occurred. This is not verified server-to-
-		// server (there is nothing to verify), but it's also never
-		// trusted to mark the order paid — only ever used to mark the
-		// attempt failed so a retry is possible.
-		if _, err := h.repository.FinalizeFailedPayment(r.Context(), authority, nil); err != nil {
-			log.Printf("payment: failed to finalize cancelled/declined attempt for authority: %v", err)
-		}
 		h.redirectResult(w, r, attempt.OrderID, "cancelled")
 		return
 	}
@@ -167,21 +187,19 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		Authority: authority,
 		Amount:    attempt.Amount,
 	})
-	if err != nil {
-		log.Printf("payment: zarinpal verify failed for authority: %v", err)
-		if _, ferr := h.repository.FinalizeFailedPayment(r.Context(), authority, nil); ferr != nil {
-			log.Printf("payment: failed to finalize failed verification: %v", ferr)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err != nil || (verifyOut.Code != codeSuccess && verifyOut.Code != codeAlreadyVerified) || verifyOut.RefID <= 0 {
+		var code *int
+		if err == nil && verifyOut.Code < 0 {
+			code = &verifyOut.Code
 		}
-		h.redirectResult(w, r, attempt.OrderID, "failed")
-		return
-	}
-
-	if verifyOut.Code != 100 && !verifyOut.AlreadyVerified {
-		code := verifyOut.Code
-		if _, ferr := h.repository.FinalizeFailedPayment(r.Context(), authority, &code); ferr != nil {
-			log.Printf("payment: failed to finalize rejected verification: %v", ferr)
+		result, ferr := h.repository.FinalizeFailedPayment(persistCtx, authority, code)
+		outcome := "unknown"
+		if ferr == nil && result.FinalStatus == StatusPaid {
+			outcome = "success"
 		}
-		h.redirectResult(w, r, attempt.OrderID, "failed")
+		h.redirectResult(w, r, attempt.OrderID, outcome)
 		return
 	}
 
@@ -197,7 +215,7 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		h.redirectResult(w, r, result.OrderID, "success")
 		return
 	}
-	h.redirectResult(w, r, result.OrderID, "failed")
+	h.redirectResult(w, r, result.OrderID, "unknown")
 }
 
 // AdminListAttempts returns every ZarinPal payment attempt for order {id},

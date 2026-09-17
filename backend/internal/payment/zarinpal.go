@@ -3,44 +3,32 @@ package payment
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-// ZarinPal v4 REST endpoints, confirmed against the current official
-// documentation (zarinpal.com/docs/sdk/php/method/request,
-// zarinpal.com/docs/sdk/php/method/verify) and ZarinPal-Lab's own sample
-// code/OSS clients as of this integration. Amounts are always integers in
-// Rials (IRR); ZarinPal enforces a minimum of 10,000 Rials per payment.
 const (
-	baseURLProduction = "https://payment.zarinpal.com/pg/v4/payment/"
-	baseURLSandbox    = "https://sandbox.zarinpal.com/pg/v4/payment/"
-
+	baseURLProduction     = "https://payment.zarinpal.com/pg/v4/payment/"
+	baseURLSandbox        = "https://sandbox.zarinpal.com/pg/v4/payment/"
 	startPayURLProduction = "https://www.zarinpal.com/pg/StartPay/"
 	startPayURLSandbox    = "https://sandbox.zarinpal.com/pg/StartPay/"
-
-	requestPath = "request.json"
-	verifyPath  = "verify.json"
+	requestPath           = "request.json"
+	verifyPath            = "verify.json"
+	codeSuccess           = 100
+	codeAlreadyVerified   = 101
+	maxResponseBytes      = 1 << 20
+	minimumAmountIRR      = 10000
 )
 
-// Success/idempotent response codes from ZarinPal's `data.code` field.
-// 100 = the operation just succeeded (payment authorized, or verified for
-// the first time). 101 = specifically returned by verify.json when the
-// transaction was already verified previously — ZarinPal explicitly
-// documents this as a success-equivalent code so a duplicate/retried
-// verify call is not treated as an error. All other codes (in particular,
-// every negative code) are failures.
-const (
-	codeSuccess         = 100
-	codeAlreadyVerified = 101
-)
-
-// RequestPaymentInput is the information needed to start a new ZarinPal
-// payment. Amount is in Rials.
 type RequestPaymentInput struct {
 	Amount      int64
 	Description string
@@ -49,9 +37,6 @@ type RequestPaymentInput struct {
 	Email       string
 }
 
-// RequestPaymentOutput is ZarinPal's response to a successful payment
-// request: the authority to persist and use for verification, and the
-// full URL to redirect the browser to.
 type RequestPaymentOutput struct {
 	Authority   string
 	RedirectURL string
@@ -59,20 +44,11 @@ type RequestPaymentOutput struct {
 	Message     string
 }
 
-// VerifyPaymentInput is the information needed to verify a completed
-// payment. Amount MUST be the amount that was actually requested (read
-// from our own persisted payment_attempts row), never a value supplied by
-// the browser/callback.
 type VerifyPaymentInput struct {
 	Authority string
 	Amount    int64
 }
 
-// VerifyPaymentOutput is ZarinPal's response to a verification call.
-// AlreadyVerified is true when ZarinPal's response code was 101 (the
-// transaction had already been verified in a previous call) — callers
-// should treat this as success but must not re-run any paid-order side
-// effects a second time.
 type VerifyPaymentOutput struct {
 	Code            int
 	Message         string
@@ -80,33 +56,51 @@ type VerifyPaymentOutput struct {
 	AlreadyVerified bool
 }
 
-// Client is the interface the payment package depends on for talking to
-// ZarinPal, so tests can substitute a fake implementation instead of
-// making real network calls (there is no live-gateway dependency in
-// automated tests).
 type Client interface {
 	RequestPayment(ctx context.Context, in RequestPaymentInput) (RequestPaymentOutput, error)
 	VerifyPayment(ctx context.Context, in VerifyPaymentInput) (VerifyPaymentOutput, error)
 }
 
-// ZarinPalClient is the real Client implementation, talking to ZarinPal's
-// v4 REST API over stdlib net/http (no third-party ZarinPal SDK — see
-// AGENTS.md/task instructions on avoiding unnecessary dependencies).
+type ProviderError struct {
+	Code int
+}
+
+func (e *ProviderError) Error() string {
+	return fmt.Sprintf("zarinpal: provider rejected payment (code=%d)", e.Code)
+}
+
+var ErrProviderUnavailable = errors.New("zarinpal: provider unavailable")
+var errInvalidResponse = errors.New("zarinpal: invalid provider response")
+
 type ZarinPalClient struct {
 	MerchantID string
 	Sandbox    bool
 	httpClient *http.Client
 }
 
-// NewZarinPalClient constructs a ZarinPalClient with a bounded-timeout
-// HTTP client, so a slow/unresponsive ZarinPal never hangs a request
-// indefinitely.
 func NewZarinPalClient(merchantID string, sandbox bool) *ZarinPalClient {
 	return &ZarinPalClient{
-		MerchantID: merchantID,
+		MerchantID: strings.ToLower(merchantID),
 		Sandbox:    sandbox,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
+}
+
+func (c *ZarinPalClient) Environment() string {
+	if c.Sandbox {
+		return "sandbox"
+	}
+	return "live"
+}
+
+func (c *ZarinPalClient) Identity() string {
+	sum := sha256.Sum256([]byte(strings.ToLower(c.MerchantID) + "\n" + c.Environment()))
+	return hex.EncodeToString(sum[:])
 }
 
 func (c *ZarinPalClient) baseURL() string {
@@ -123,8 +117,6 @@ func (c *ZarinPalClient) startPayURL() string {
 	return startPayURLProduction
 }
 
-// zarinpalMetadata carries optional contact fields under ZarinPal's
-// "metadata" object, per the current request.json contract.
 type zarinpalMetadata struct {
 	Mobile string `json:"mobile,omitempty"`
 	Email  string `json:"email,omitempty"`
@@ -133,6 +125,7 @@ type zarinpalMetadata struct {
 type paymentRequestBody struct {
 	MerchantID  string            `json:"merchant_id"`
 	Amount      int64             `json:"amount"`
+	Currency    string            `json:"currency"`
 	Description string            `json:"description"`
 	CallbackURL string            `json:"callback_url"`
 	Metadata    *zarinpalMetadata `json:"metadata,omitempty"`
@@ -144,144 +137,281 @@ type paymentVerifyBody struct {
 	Authority  string `json:"authority"`
 }
 
-// zarinpalErrors mirrors ZarinPal's top-level "errors" object, returned
-// instead of "data" when the request itself is rejected (e.g. invalid
-// merchant_id, validation failure) rather than merely unsuccessful.
-type zarinpalErrors struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type paymentRequestResponse struct {
-	Data struct {
-		Code      int    `json:"code"`
-		Message   string `json:"message"`
-		Authority string `json:"authority"`
-	} `json:"data"`
-	Errors zarinpalErrors `json:"errors"`
-}
-
-type paymentVerifyResponse struct {
-	Data struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		RefID   int64  `json:"ref_id"`
-	} `json:"data"`
-	Errors zarinpalErrors `json:"errors"`
-}
-
-// RequestPayment calls ZarinPal's payment/request.json to obtain an
-// authority and redirect URL for a new payment. It never treats a
-// malformed/partial response as success: a missing authority alongside a
-// success code, or an HTTP-level failure, is always returned as an error.
 func (c *ZarinPalClient) RequestPayment(ctx context.Context, in RequestPaymentInput) (RequestPaymentOutput, error) {
+	if in.Amount < minimumAmountIRR {
+		return RequestPaymentOutput{}, errors.New("zarinpal: amount must be at least 10000 IRR")
+	}
 	var metadata *zarinpalMetadata
 	if in.Mobile != "" || in.Email != "" {
 		metadata = &zarinpalMetadata{Mobile: in.Mobile, Email: in.Email}
 	}
-
-	body := paymentRequestBody{
+	resp, err := c.post(ctx, requestPath, paymentRequestBody{
 		MerchantID:  c.MerchantID,
 		Amount:      in.Amount,
+		Currency:    "IRR",
 		Description: in.Description,
 		CallbackURL: in.CallbackURL,
 		Metadata:    metadata,
-	}
-
-	var resp paymentRequestResponse
-	if err := c.post(ctx, requestPath, body, &resp); err != nil {
+	})
+	if err != nil {
 		return RequestPaymentOutput{}, err
 	}
-
-	if resp.Data.Code != codeSuccess || resp.Data.Authority == "" {
-		msg := resp.Data.Message
-		if msg == "" {
-			msg = resp.Errors.Message
-		}
-		return RequestPaymentOutput{}, fmt.Errorf("zarinpal payment request rejected (code=%d): %s", resp.Data.Code, msg)
+	if resp.code < 0 {
+		return RequestPaymentOutput{}, &ProviderError{Code: resp.code}
 	}
-
+	authority, ok := requiredString(resp.data, "authority")
+	if resp.code != codeSuccess || !ok || !validAuthority(authority) {
+		return RequestPaymentOutput{}, errInvalidResponse
+	}
 	return RequestPaymentOutput{
-		Authority:   resp.Data.Authority,
-		RedirectURL: c.startPayURL() + resp.Data.Authority,
-		Code:        resp.Data.Code,
-		Message:     resp.Data.Message,
+		Authority:   authority,
+		RedirectURL: c.startPayURL() + authority,
+		Code:        resp.code,
+		Message:     resp.message,
 	}, nil
 }
 
-// VerifyPayment calls ZarinPal's payment/verify.json to confirm a
-// completed payment server-to-server. amount must be the amount originally
-// requested for this authority (read from our own database), never a
-// value supplied by the browser. A response code of 101 ("already
-// verified") is reported as success via AlreadyVerified rather than an
-// error, per ZarinPal's documented semantics.
 func (c *ZarinPalClient) VerifyPayment(ctx context.Context, in VerifyPaymentInput) (VerifyPaymentOutput, error) {
-	body := paymentVerifyBody{
+	if in.Amount < minimumAmountIRR {
+		return VerifyPaymentOutput{}, errors.New("zarinpal: amount must be at least 10000 IRR")
+	}
+	if !validAuthority(in.Authority) {
+		return VerifyPaymentOutput{}, errors.New("zarinpal: invalid authority")
+	}
+	resp, err := c.post(ctx, verifyPath, paymentVerifyBody{
 		MerchantID: c.MerchantID,
 		Amount:     in.Amount,
 		Authority:  in.Authority,
-	}
-
-	var resp paymentVerifyResponse
-	if err := c.post(ctx, verifyPath, body, &resp); err != nil {
+	})
+	if err != nil {
 		return VerifyPaymentOutput{}, err
 	}
-
-	switch resp.Data.Code {
-	case codeSuccess:
-		return VerifyPaymentOutput{Code: resp.Data.Code, Message: resp.Data.Message, RefID: resp.Data.RefID}, nil
-	case codeAlreadyVerified:
-		return VerifyPaymentOutput{Code: resp.Data.Code, Message: resp.Data.Message, RefID: resp.Data.RefID, AlreadyVerified: true}, nil
-	default:
-		msg := resp.Data.Message
-		if msg == "" {
-			msg = resp.Errors.Message
-		}
-		return VerifyPaymentOutput{Code: resp.Data.Code, Message: msg}, nil
+	if resp.code < 0 {
+		return VerifyPaymentOutput{Code: resp.code}, nil
 	}
+	refID, ok := requiredInteger(resp.data, "ref_id")
+	if !ok || refID <= 0 || resp.code != codeSuccess && resp.code != codeAlreadyVerified {
+		return VerifyPaymentOutput{}, errInvalidResponse
+	}
+	return VerifyPaymentOutput{
+		Code:            resp.code,
+		Message:         resp.message,
+		RefID:           refID,
+		AlreadyVerified: resp.code == codeAlreadyVerified,
+	}, nil
 }
 
-// post sends a JSON POST request to ZarinPal and decodes the response into
-// out. It never logs the request body (which contains the Merchant ID) and
-// treats any non-2xx status or malformed JSON body as an error rather than
-// guessing at success.
-func (c *ZarinPalClient) post(ctx context.Context, path string, body any, out any) error {
+func validAuthority(authority string) bool {
+	if len(authority) == 0 || len(authority) > 255 {
+		return false
+	}
+	for _, ch := range authority {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+type providerResponse struct {
+	code    int
+	message string
+	data    map[string]any
+}
+
+func (c *ZarinPalClient) post(ctx context.Context, path string, body any) (providerResponse, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("zarinpal: failed to encode request: %w", err)
+		return providerResponse{}, errors.New("zarinpal: cannot encode request")
 	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+path, bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("zarinpal: failed to build request: %w", err)
+		return providerResponse{}, errors.New("zarinpal: cannot build request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("zarinpal: request failed: %w", err)
+		return providerResponse{}, ErrProviderUnavailable
 	}
 	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("zarinpal: failed to read response: %w", err)
+		return providerResponse{}, ErrProviderUnavailable
 	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("zarinpal: unexpected HTTP status %d", resp.StatusCode)
+	if len(respBody) > maxResponseBytes {
+		return providerResponse{}, errInvalidResponse
 	}
-
-	if err := json.Unmarshal(respBody, out); err != nil {
-		return fmt.Errorf("zarinpal: malformed response body: %w", err)
+	decoded, err := decodeProviderResponse(respBody)
+	if err != nil {
+		return providerResponse{}, err
 	}
-
-	return nil
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 || (resp.StatusCode < 200 || resp.StatusCode >= 300) && decoded.code >= 0 {
+		return providerResponse{}, errors.New("zarinpal: unexpected HTTP status")
+	}
+	return decoded, nil
 }
 
-// ErrProviderUnavailable is a sentinel wrapper callers may use to detect
-// "we could not reach ZarinPal at all" versus "ZarinPal responded with a
-// rejection", though V1 callers currently treat both the same way (fail
-// the attempt, never mark paid).
-var ErrProviderUnavailable = errors.New("zarinpal: provider unavailable")
+func decodeProviderResponse(body []byte) (providerResponse, error) {
+	if !utf8.Valid(body) {
+		return providerResponse{}, errInvalidResponse
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	value, err := decodeUniqueJSON(decoder, 0)
+	if err != nil {
+		return providerResponse{}, errInvalidResponse
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return providerResponse{}, errInvalidResponse
+	}
+	envelope, ok := value.(map[string]any)
+	if !ok {
+		return providerResponse{}, errInvalidResponse
+	}
+	dataValue, hasData := envelope["data"]
+	errorsValue, hasErrors := envelope["errors"]
+	if !hasData || !hasErrors || dataValue == nil || errorsValue == nil {
+		return providerResponse{}, errInvalidResponse
+	}
+	if rejection, ok := errorsValue.(map[string]any); ok {
+		data, empty := dataValue.([]any)
+		code, message, valid := responseCode(rejection)
+		if !empty || len(data) != 0 || !valid || code >= 0 || !validResponseFields(rejection) {
+			return providerResponse{}, errInvalidResponse
+		}
+		if _, present := rejection["authority"]; present {
+			return providerResponse{}, errInvalidResponse
+		}
+		if _, present := rejection["ref_id"]; present {
+			return providerResponse{}, errInvalidResponse
+		}
+		return providerResponse{code: code, message: message}, nil
+	}
+	errorsArray, ok := errorsValue.([]any)
+	if !ok || len(errorsArray) != 0 {
+		return providerResponse{}, errInvalidResponse
+	}
+	data, ok := dataValue.(map[string]any)
+	if !ok || !validResponseFields(data) {
+		return providerResponse{}, errInvalidResponse
+	}
+	code, message, ok := responseCode(data)
+	if !ok || code == 0 || code > 0 && code != codeSuccess && code != codeAlreadyVerified {
+		return providerResponse{}, errInvalidResponse
+	}
+	if code < 0 {
+		if _, present := data["authority"]; present {
+			return providerResponse{}, errInvalidResponse
+		}
+		if _, present := data["ref_id"]; present {
+			return providerResponse{}, errInvalidResponse
+		}
+	}
+	return providerResponse{code: code, message: message, data: data}, nil
+}
+
+func responseCode(data map[string]any) (int, string, bool) {
+	code, ok := requiredInteger(data, "code")
+	message, valid := requiredString(data, "message")
+	return int(code), message, ok && valid && int64(int(code)) == code
+}
+
+func requiredString(data map[string]any, key string) (string, bool) {
+	value, ok := data[key].(string)
+	return value, ok && strings.TrimSpace(value) != ""
+}
+
+func requiredInteger(data map[string]any, key string) (int64, bool) {
+	value, ok := data[key].(json.Number)
+	if !ok {
+		return 0, false
+	}
+	number, err := strconv.ParseInt(string(value), 10, 64)
+	return number, err == nil
+}
+
+func validResponseFields(data map[string]any) bool {
+	for _, key := range []string{"authority", "fee_type", "card_hash", "card_pan"} {
+		if _, exists := data[key]; exists {
+			if _, ok := requiredString(data, key); !ok {
+				return false
+			}
+		}
+	}
+	for _, key := range []string{"fee", "ref_id"} {
+		if _, exists := data[key]; exists {
+			if value, ok := requiredInteger(data, key); !ok || value < 0 {
+				return false
+			}
+		}
+	}
+	if validations, exists := data["validations"]; exists {
+		switch validations.(type) {
+		case map[string]any, []any:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func decodeUniqueJSON(decoder *json.Decoder, depth int) (any, error) {
+	if depth > 64 {
+		return nil, errInvalidResponse
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch token {
+	case json.Delim('{'):
+		object := make(map[string]any)
+		seen := make(map[string]bool)
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return nil, err
+			}
+			key, ok := token.(string)
+			if !ok || seen[strings.ToLower(key)] {
+				return nil, errInvalidResponse
+			}
+			lowerKey := strings.ToLower(key)
+			switch lowerKey {
+			case "data", "errors", "code", "message", "authority", "ref_id", "fee", "fee_type", "card_hash", "card_pan", "validations":
+				if key != lowerKey {
+					return nil, errInvalidResponse
+				}
+			}
+			seen[lowerKey] = true
+			value, err := decodeUniqueJSON(decoder, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			object[key] = value
+		}
+		if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
+			return nil, errInvalidResponse
+		}
+		return object, nil
+	case json.Delim('['):
+		array := make([]any, 0)
+		for decoder.More() {
+			value, err := decodeUniqueJSON(decoder, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			array = append(array, value)
+		}
+		if end, err := decoder.Token(); err != nil || end != json.Delim(']') {
+			return nil, errInvalidResponse
+		}
+		return array, nil
+	default:
+		if _, ok := token.(json.Delim); ok {
+			return nil, errInvalidResponse
+		}
+		return token, nil
+	}
+}
