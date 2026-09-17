@@ -390,6 +390,13 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 	// terminal and can only be reached from 'shipped', never followed by
 	// 'cancelled').
 	if newStatus == StatusCancelled {
+		blocked, err := paymentBlocksCancellation(ctx, tx, orderID, paymentStatus)
+		if err != nil {
+			return AdminOrderWithItems{}, err
+		}
+		if blocked {
+			return AdminOrderWithItems{}, ErrInvalidTransition
+		}
 		if err := restoreOrderStock(ctx, tx, orderID); err != nil {
 			return AdminOrderWithItems{}, err
 		}
@@ -442,7 +449,11 @@ func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) 
 		return OrderWithItems{}, ErrOrderNotFound
 	}
 
-	if paymentStatus == PaymentStatusPaid {
+	blocked, err := paymentBlocksCancellation(ctx, tx, orderID, paymentStatus)
+	if err != nil {
+		return OrderWithItems{}, err
+	}
+	if blocked {
 		return OrderWithItems{}, ErrOrderNotEligibleForCancel
 	}
 
@@ -464,6 +475,22 @@ func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) 
 	}
 
 	return r.GetByIDForUser(ctx, userID, orderID)
+}
+
+func paymentBlocksCancellation(ctx context.Context, tx pgx.Tx, orderID int64, paymentStatus string) (bool, error) {
+	if paymentStatus == PaymentStatusPaid || paymentStatus == PaymentStatusRefunded {
+		return true, nil
+	}
+
+	var exists bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM payment_attempts
+			WHERE order_id = $1
+			  AND (status IN ('pending', 'paid', 'reconciliation') OR authority IS NOT NULL)
+		)
+	`, orderID).Scan(&exists)
+	return exists, err
 }
 
 // restoreOrderStock restores the stock quantities consumed by orderID's

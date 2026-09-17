@@ -53,10 +53,13 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       APP_ENV: production
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
       PORT: 8080
       ZARINPAL_MERCHANT_ID: ${ZARINPAL_MERCHANT_ID:-}
       ZARINPAL_CALLBACK_URL: ${ZARINPAL_CALLBACK_URL:-}
-      ZARINPAL_SANDBOX: ${ZARINPAL_SANDBOX:-true}
+      ZARINPAL_ENABLED: ${ZARINPAL_ENABLED:-false}
+      ZARINPAL_SANDBOX: ${ZARINPAL_SANDBOX:-}
+      ZARINPAL_LIVE_ENABLED: ${ZARINPAL_LIVE_ENABLED:-false}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s

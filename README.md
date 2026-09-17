@@ -86,6 +86,28 @@ The Vite dev server proxies `/api/*` to `http://localhost:8080` (see
 `frontend/vite.config.ts`), so the frontend never needs a hard-coded API
 base URL, in dev or in production.
 
+### Payment result redirects
+
+Set the backend environment variable `FRONTEND_BASE_URL=http://localhost:5173`
+when running Vite separately from the API on port 8080. Payment callbacks then
+redirect to `http://localhost:5173/payment/result` with URL-encoded `order_id`
+and `outcome` parameters. `ZARINPAL_CALLBACK_URL` still points at the backend's
+`/api/v1/payments/zarinpal/callback` endpoint, not the frontend result page.
+Export these variables before starting Go; the backend does not load `.env` automatically.
+
+For production, set `FRONTEND_BASE_URL=https://shop.example.com` to your public
+storefront origin. Compose passes this variable to the backend. With nginx,
+use the same public origin that serves the SPA and proxies `/api/`; do not use
+an internal container address. Leaving the variable unset preserves relative,
+same-origin `/payment/result` redirects (not suitable for split-origin development).
+
+The base URL must be an HTTP(S) origin with no credentials, query, fragment,
+or path prefix; an optional trailing slash is normalized. HTTP is allowed only
+for localhost, `*.localhost`, `127.0.0.1`, or `::1` during development.
+`APP_ENV=production` or non-sandbox payments require HTTPS and a public host.
+Invalid configured URLs fail startup, even when payments are disabled.
+Callback/query parameters never determine the redirect destination.
+
 ### 5. Run backend tests
 
 ```sh

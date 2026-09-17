@@ -8,46 +8,96 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Repository persists payment_attempts rows and coordinates the small
-// amount of orders-table state (payment_status, payment_method) that a
-// payment attempt affects. It talks to the orders table directly (via raw
-// SQL) rather than depending on the order package's Repository type, to
-// avoid a circular package dependency — order and payment are siblings
-// under internal/, and only main.go wires them together.
 type Repository struct {
-	db *pgxpool.Pool
+	db          *pgxpool.Pool
+	environment string
+	identity    string
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	return &Repository{db: db, environment: "test", identity: "test"}
 }
 
-// orderForPayment is the minimal order snapshot needed to decide whether a
-// new payment attempt may be created and, if so, for how much.
+func (r *Repository) ConfigureProvider(environment, accountKey string) {
+	r.environment = environment
+	r.identity = accountKey
+}
+
 type orderForPayment struct {
 	ID            int64
 	UserID        int64
 	Status        string
 	Total         int64
+	Currency      string
 	PaymentStatus string
 }
 
-// nonPayableStatuses are order statuses that can never be paid, regardless
-// of payment_status: a cancelled order should never be resurrected by a
-// stray payment, and a delivered order has already completed its
-// lifecycle (V1 has no post-delivery payment/refund flow).
-var nonPayableStatuses = map[string]bool{
-	"cancelled": true,
-	"delivered": true,
+const attemptColumns = `id, order_id, provider, currency, environment, account_key, authority, amount, status, ref_id, provider_code, created_at, updated_at, verified_at`
+
+func scanAttempt(row pgx.Row) (Attempt, error) {
+	var a Attempt
+	err := row.Scan(
+		&a.ID, &a.OrderID, &a.Provider, &a.Currency, &a.Environment, &a.AccountKey,
+		&a.Authority, &a.Amount, &a.Status, &a.RefID, &a.ProviderCode,
+		&a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Attempt{}, ErrAttemptNotFound
+	}
+	return a, err
 }
 
-// CreateAttemptForOrder starts a new payment attempt for orderID, but only
-// if the order belongs to userID, is not already paid, and is not in a
-// terminal non-payable status (cancelled/delivered). The attempt amount is
-// always the order's persisted total — never a client-supplied value. The
-// order's payment_method is set to "zarinpal" as part of the same
-// transaction, so a freshly created attempt and the order's payment_method
-// change together atomically.
+func lockOrderForPayment(ctx context.Context, tx pgx.Tx, orderID int64) (orderForPayment, error) {
+	var o orderForPayment
+	err := tx.QueryRow(ctx, `
+		SELECT id, user_id, status, total, currency, payment_status
+		FROM orders WHERE id = $1 FOR UPDATE
+	`, orderID).Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.Currency, &o.PaymentStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return o, ErrOrderNotFound
+	}
+	return o, err
+}
+
+func lockPaymentAttempt(ctx context.Context, tx pgx.Tx, attemptID int64) (orderForPayment, Attempt, error) {
+	var orderID int64
+	err := tx.QueryRow(ctx, `SELECT order_id FROM payment_attempts WHERE id = $1`, attemptID).Scan(&orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return orderForPayment{}, Attempt{}, ErrAttemptNotFound
+	}
+	if err != nil {
+		return orderForPayment{}, Attempt{}, err
+	}
+	o, err := lockOrderForPayment(ctx, tx, orderID)
+	if err != nil {
+		return o, Attempt{}, err
+	}
+	a, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE id = $1 AND order_id = $2 FOR UPDATE`, attemptID, orderID))
+	return o, a, err
+}
+
+func lockPaymentAuthority(ctx context.Context, tx pgx.Tx, authority string) (orderForPayment, Attempt, error) {
+	var attemptID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM payment_attempts WHERE authority = $1`, authority).Scan(&attemptID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return orderForPayment{}, Attempt{}, ErrAttemptNotFound
+	}
+	if err != nil {
+		return orderForPayment{}, Attempt{}, err
+	}
+	return lockPaymentAttempt(ctx, tx, attemptID)
+}
+
+func (r *Repository) matchesProvider(a Attempt) bool {
+	if a.Provider != ProviderZarinPal || a.Environment != r.environment || a.Environment == "legacy" || a.Environment == "" {
+		return false
+	}
+	if r.environment == "test" && r.identity == "test" && a.AccountKey == "" {
+		return true
+	}
+	return r.identity != "" && a.AccountKey == r.identity
+}
+
 func (r *Repository) CreateAttemptForOrder(ctx context.Context, userID, orderID int64) (Attempt, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -55,15 +105,8 @@ func (r *Repository) CreateAttemptForOrder(ctx context.Context, userID, orderID 
 	}
 	defer tx.Rollback(ctx)
 
-	var o orderForPayment
-	err = tx.QueryRow(ctx, `
-		SELECT id, user_id, status, total, payment_status
-		FROM orders WHERE id = $1 FOR UPDATE
-	`, orderID).Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.PaymentStatus)
+	o, err := lockOrderForPayment(ctx, tx, orderID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Attempt{}, ErrOrderNotFound
-		}
 		return Attempt{}, err
 	}
 	if o.UserID != userID {
@@ -72,195 +115,190 @@ func (r *Repository) CreateAttemptForOrder(ctx context.Context, userID, orderID 
 	if o.PaymentStatus == "paid" {
 		return Attempt{}, ErrOrderAlreadyPaid
 	}
-	if nonPayableStatuses[o.Status] {
+	if o.Status != "pending" || o.PaymentStatus != "pending" && o.PaymentStatus != "failed" || o.Total < 10000 || o.Currency != "IRR" {
 		return Attempt{}, ErrOrderNotPayable
 	}
-
-	var a Attempt
+	if !r.matchesProvider(Attempt{Provider: ProviderZarinPal, Environment: r.environment, AccountKey: r.identity}) {
+		return Attempt{}, ErrProviderMismatch
+	}
+	var active bool
 	err = tx.QueryRow(ctx, `
-		INSERT INTO payment_attempts (order_id, provider, amount, status)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, order_id, provider, authority, amount, status, ref_id, provider_code, created_at, updated_at, verified_at
-	`, orderID, ProviderZarinPal, o.Total, StatusPending).Scan(
-		&a.ID, &a.OrderID, &a.Provider, &a.Authority, &a.Amount, &a.Status,
-		&a.RefID, &a.ProviderCode, &a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt,
-	)
+		SELECT EXISTS (
+			SELECT 1 FROM payment_attempts WHERE order_id = $1
+			AND (status IN ('pending', 'paid', 'reconciliation') OR authority IS NOT NULL)
+		)
+	`, orderID).Scan(&active)
 	if err != nil {
 		return Attempt{}, err
 	}
-
-	// Record that this order now has a ZarinPal attempt in flight. This is
-	// set regardless of whether the upcoming request.json call actually
-	// succeeds, since a retried attempt on the same order is still a
-	// ZarinPal order from the customer's perspective; payment_status stays
-	// "pending" either way.
-	_, err = tx.Exec(ctx, `UPDATE orders SET payment_method = $1, updated_at = NOW() WHERE id = $2`, "zarinpal", orderID)
+	if active {
+		return Attempt{}, ErrPaymentInProgress
+	}
+	a, err := scanAttempt(tx.QueryRow(ctx, `
+		INSERT INTO payment_attempts (order_id, provider, amount, currency, environment, account_key, status)
+		VALUES ($1, $2, $3, 'IRR', $4, $5, 'pending')
+		RETURNING `+attemptColumns, orderID, ProviderZarinPal, o.Total, r.environment, r.identity))
 	if err != nil {
 		return Attempt{}, err
 	}
-
+	_, err = tx.Exec(ctx, `UPDATE orders SET payment_method = 'zarinpal', updated_at = NOW() WHERE id = $1`, orderID)
+	if err != nil {
+		return Attempt{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Attempt{}, err
 	}
 	return a, nil
 }
 
-// SetAuthority persists the authority ZarinPal returned for attemptID once
-// the request.json call has succeeded. Left unset (NULL) if the request
-// call fails, so a failed attempt never has a usable authority.
 func (r *Repository) SetAuthority(ctx context.Context, attemptID int64, authority string) error {
-	_, err := r.db.Exec(ctx, `
-		UPDATE payment_attempts SET authority = $1, updated_at = NOW() WHERE id = $2
+	if len(authority) > 64 || !validAuthority(authority) {
+		return ErrInvalidAuthority
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, a, err := lockPaymentAttempt(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	if !r.matchesProvider(a) {
+		return ErrProviderMismatch
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE payment_attempts SET authority = $1, updated_at = NOW()
+		WHERE id = $2 AND status = 'pending' AND (authority IS NULL OR authority = $1)
 	`, authority, attemptID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrAlreadyProcessed
+	}
+	return tx.Commit(ctx)
 }
 
-// MarkAttemptFailed marks attemptID as failed. providerCode is stored when
-// available (e.g. a rejection code from ZarinPal); pass nil when the
-// failure was purely local (e.g. a network error before any response was
-// received).
 func (r *Repository) MarkAttemptFailed(ctx context.Context, attemptID int64, providerCode *int) error {
-	_, err := r.db.Exec(ctx, `
-		UPDATE payment_attempts
-		SET status = $1, provider_code = $2, updated_at = NOW()
-		WHERE id = $3
-	`, StatusFailed, providerCode, attemptID)
-	return err
-}
-
-// attemptByAuthorityForUpdate loads and locks (FOR UPDATE) the attempt
-// matching authority, inside tx. Returns ErrAttemptNotFound if no such
-// attempt exists — this is the only lookup path the public callback
-// endpoint uses, so an authority can never be used to reach any order
-// other than the one it was actually issued for.
-func attemptByAuthorityForUpdate(ctx context.Context, tx pgx.Tx, authority string) (Attempt, error) {
-	var a Attempt
-	err := tx.QueryRow(ctx, `
-		SELECT id, order_id, provider, authority, amount, status, ref_id, provider_code, created_at, updated_at, verified_at
-		FROM payment_attempts
-		WHERE authority = $1
-		FOR UPDATE
-	`, authority).Scan(
-		&a.ID, &a.OrderID, &a.Provider, &a.Authority, &a.Amount, &a.Status,
-		&a.RefID, &a.ProviderCode, &a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt,
-	)
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Attempt{}, ErrAttemptNotFound
-		}
-		return Attempt{}, err
+		return err
 	}
-	return a, nil
+	defer tx.Rollback(ctx)
+	_, a, err := lockPaymentAttempt(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	if !r.matchesProvider(a) {
+		return ErrProviderMismatch
+	}
+	if a.Status != StatusPending || a.Authority != nil {
+		return ErrAlreadyProcessed
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE payment_attempts SET status = 'failed', provider_code = $1, updated_at = NOW()
+		WHERE id = $2 AND status = 'pending' AND authority IS NULL
+	`, providerCode, attemptID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrAlreadyProcessed
+	}
+	return tx.Commit(ctx)
 }
 
-// GetAttemptByAuthority returns the attempt matching authority without
-// taking any lock, for read-only lookups (e.g. building a result page).
 func (r *Repository) GetAttemptByAuthority(ctx context.Context, authority string) (Attempt, error) {
-	var a Attempt
-	err := r.db.QueryRow(ctx, `
-		SELECT id, order_id, provider, authority, amount, status, ref_id, provider_code, created_at, updated_at, verified_at
-		FROM payment_attempts
-		WHERE authority = $1
-	`, authority).Scan(
-		&a.ID, &a.OrderID, &a.Provider, &a.Authority, &a.Amount, &a.Status,
-		&a.RefID, &a.ProviderCode, &a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Attempt{}, ErrAttemptNotFound
-		}
-		return Attempt{}, err
-	}
-	return a, nil
+	return scanAttempt(r.db.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE authority = $1`, authority))
 }
 
-// VerifyResult is what the caller (handler) learns after attempting to
-// finalize a callback: which order was affected, and whether this call is
-// the one that actually transitioned it to paid (as opposed to a duplicate
-// callback that found the attempt already settled).
 type VerifyResult struct {
 	OrderID        int64
 	AlreadySettled bool
-	FinalStatus    string // StatusPaid or StatusFailed
+	FinalStatus    string
 }
 
-// FinalizeVerifiedPayment records a successful (or already-verified)
-// ZarinPal verification for the attempt matching authority, and — only the
-// first time this happens for a given attempt — marks the parent order as
-// paid. Everything happens inside one transaction, with the attempt row
-// locked FOR UPDATE, so concurrent/duplicate callbacks for the same
-// authority serialize against each other: the second caller sees the
-// attempt already in status "paid" and returns AlreadySettled = true
-// without re-touching the order or ref_id.
 func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority string, refID int64, providerCode int) (VerifyResult, error) {
+	if refID <= 0 || providerCode != 100 && providerCode != 101 {
+		return VerifyResult{}, ErrInvalidVerification
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return VerifyResult{}, err
 	}
 	defer tx.Rollback(ctx)
-
-	a, err := attemptByAuthorityForUpdate(ctx, tx, authority)
+	o, a, err := lockPaymentAuthority(ctx, tx, authority)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-
-	if a.Status == StatusPaid {
-		return VerifyResult{OrderID: a.OrderID, AlreadySettled: true, FinalStatus: StatusPaid}, tx.Commit(ctx)
+	if !r.matchesProvider(a) {
+		return VerifyResult{}, ErrProviderMismatch
 	}
-	if a.Status == StatusFailed {
-		// The attempt was already conclusively marked failed (e.g. a
-		// previous verify call rejected it); do not resurrect it into paid
-		// on a later, inconsistent callback.
-		return VerifyResult{OrderID: a.OrderID, AlreadySettled: true, FinalStatus: StatusFailed}, tx.Commit(ctx)
+	if a.Status == StatusPaid || a.Status == StatusReconciliation {
+		return VerifyResult{OrderID: a.OrderID, AlreadySettled: true, FinalStatus: a.Status}, tx.Commit(ctx)
 	}
-
 	_, err = tx.Exec(ctx, `
+		SELECT pg_advisory_xact_lock(hashtextextended(jsonb_build_array($1::text, $2::text, $3::text, $4::bigint)::text, 0))
+	`, a.Provider, a.Environment, a.AccountKey, refID)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	var conflictingPayment bool
+	err = tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM payment_attempts WHERE status = 'paid' AND id <> $1
+			AND (order_id = $2 OR (provider = $3 AND environment = $4 AND account_key = $5 AND ref_id = $6))
+		)
+	`, a.ID, a.OrderID, a.Provider, a.Environment, a.AccountKey, refID).Scan(&conflictingPayment)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	status := StatusPaid
+	if o.Status != "pending" && o.Status != "processing" && o.Status != "shipped" ||
+		o.PaymentStatus != "pending" && o.PaymentStatus != "failed" ||
+		o.Total != a.Amount || a.Amount < 10000 || o.Currency != a.Currency || a.Currency != "IRR" || conflictingPayment {
+		status = StatusReconciliation
+	}
+	tag, err := tx.Exec(ctx, `
 		UPDATE payment_attempts
 		SET status = $1, ref_id = $2, provider_code = $3, verified_at = NOW(), updated_at = NOW()
-		WHERE id = $4
-	`, StatusPaid, refID, providerCode, a.ID)
+		WHERE id = $4 AND status IN ('pending', 'failed') AND authority IS NOT NULL
+	`, status, refID, providerCode, a.ID)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-
-	_, err = tx.Exec(ctx, `
-		UPDATE orders
-		SET payment_status = 'paid', payment_method = 'zarinpal', updated_at = NOW()
-		WHERE id = $1
-	`, a.OrderID)
-	if err != nil {
-		return VerifyResult{}, err
+	if tag.RowsAffected() != 1 {
+		return VerifyResult{}, ErrAlreadyProcessed
 	}
-
+	if status == StatusPaid {
+		tag, err = tx.Exec(ctx, `
+			UPDATE orders SET payment_status = 'paid', payment_method = 'zarinpal', updated_at = NOW()
+			WHERE id = $1 AND payment_status IN ('pending', 'failed')
+		`, a.OrderID)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return VerifyResult{}, ErrOrderNotPayable
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
 	}
-	return VerifyResult{OrderID: a.OrderID, AlreadySettled: false, FinalStatus: StatusPaid}, nil
+	return VerifyResult{OrderID: a.OrderID, FinalStatus: status}, nil
 }
 
-// ListAttemptsForOrder returns every payment attempt for orderID, newest
-// first, regardless of which user placed the order. Intended for admin use
-// only — callers must enforce admin authorization before calling this (see
-// payment.Handler.AdminListAttempts).
 func (r *Repository) ListAttemptsForOrder(ctx context.Context, orderID int64) ([]Attempt, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id, order_id, provider, authority, amount, status, ref_id, provider_code, created_at, updated_at, verified_at
-		FROM payment_attempts
-		WHERE order_id = $1
-		ORDER BY id DESC
-	`, orderID)
+	rows, err := r.db.Query(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE order_id = $1 ORDER BY id DESC`, orderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	attempts := make([]Attempt, 0)
 	for rows.Next() {
-		var a Attempt
-		if err := rows.Scan(
-			&a.ID, &a.OrderID, &a.Provider, &a.Authority, &a.Amount, &a.Status,
-			&a.RefID, &a.ProviderCode, &a.CreatedAt, &a.UpdatedAt, &a.VerifiedAt,
-		); err != nil {
+		a, err := scanAttempt(rows)
+		if err != nil {
 			return nil, err
 		}
 		attempts = append(attempts, a)
@@ -268,39 +306,43 @@ func (r *Repository) ListAttemptsForOrder(ctx context.Context, orderID int64) ([
 	return attempts, rows.Err()
 }
 
-// FinalizeFailedPayment records a failed verification (or a callback that
-// reported Status != OK) for the attempt matching authority. Idempotent in
-// the same way as FinalizeVerifiedPayment: an attempt already in a
-// terminal status is left untouched and reported as AlreadySettled. Never
-// changes orders.payment_status — an order that failed one attempt can
-// still be retried with a new attempt.
 func (r *Repository) FinalizeFailedPayment(ctx context.Context, authority string, providerCode *int) (VerifyResult, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return VerifyResult{}, err
 	}
 	defer tx.Rollback(ctx)
-
-	a, err := attemptByAuthorityForUpdate(ctx, tx, authority)
+	_, a, err := lockPaymentAuthority(ctx, tx, authority)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-
-	if a.Status == StatusPaid || a.Status == StatusFailed {
+	if !r.matchesProvider(a) {
+		return VerifyResult{}, ErrProviderMismatch
+	}
+	if a.Status == StatusPaid || a.Status == StatusReconciliation {
 		return VerifyResult{OrderID: a.OrderID, AlreadySettled: true, FinalStatus: a.Status}, tx.Commit(ctx)
 	}
-
 	_, err = tx.Exec(ctx, `
-		UPDATE payment_attempts
-		SET status = $1, provider_code = $2, updated_at = NOW()
-		WHERE id = $3
-	`, StatusFailed, providerCode, a.ID)
+		UPDATE payment_attempts SET provider_code = COALESCE($1, provider_code), updated_at = NOW()
+		WHERE id = $2
+	`, providerCode, a.ID)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-
+	event := "verify_rejected"
+	if providerCode == nil {
+		event = "verify_uncertain"
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_attempt_events (attempt_id, event_type, snapshot)
+		SELECT id, $2, payment_attempt_event_snapshot(payment_attempts)
+		FROM payment_attempts WHERE id = $1
+	`, a.ID, event)
+	if err != nil {
+		return VerifyResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
 	}
-	return VerifyResult{OrderID: a.OrderID, AlreadySettled: false, FinalStatus: StatusFailed}, nil
+	return VerifyResult{OrderID: a.OrderID, FinalStatus: a.Status}, nil
 }
