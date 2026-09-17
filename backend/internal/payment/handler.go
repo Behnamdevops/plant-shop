@@ -218,6 +218,115 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	h.redirectResult(w, r, result.OrderID, "unknown")
 }
 
+func (h *Handler) adminReconciliationAccess(w http.ResponseWriter, r *http.Request) bool {
+	if _, err := h.auth.RequireAdmin(r); err != nil {
+		if errors.Is(err, auth.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+		} else {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}
+		return false
+	}
+	return true
+}
+
+func (h *Handler) reconciliationAvailability(item Reconciliation) Reconciliation {
+	if h.client == nil && item.Retryable {
+		item.Retryable = false
+		item.Reason = "payments_disabled"
+	}
+	return item
+}
+
+func (h *Handler) AdminListReconciliations(w http.ResponseWriter, r *http.Request) {
+	if !h.adminReconciliationAccess(w, r) {
+		return
+	}
+	limit := int64(50)
+	beforeID := int64(0)
+	for name, target := range map[string]*int64{"limit": &limit, "before_id": &beforeID} {
+		if raw, ok := r.URL.Query()[name]; ok {
+			value, err := strconv.ParseInt(raw[0], 10, 64)
+			if err != nil || value <= 0 || name == "limit" && value > 100 {
+				http.Error(w, "invalid pagination", http.StatusBadRequest)
+				return
+			}
+			*target = value
+		}
+	}
+	items, err := h.repository.reconciliationRows(r.Context(), 0, beforeID, int(limit))
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	for i := range items {
+		items[i] = h.reconciliationAvailability(items[i])
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func (h *Handler) ReconcilePayment(ctx context.Context, attemptID int64) (Reconciliation, error) {
+	item, err := h.repository.GetReconciliation(ctx, attemptID)
+	if err != nil {
+		return Reconciliation{}, err
+	}
+	item = h.reconciliationAvailability(item)
+	if !item.Retryable {
+		if item.Status == StatusPaid {
+			item.LastOutcome = "already_settled"
+		}
+		return item, nil
+	}
+	verifyCtx, stop := context.WithTimeout(ctx, 8*time.Second)
+	out, verifyErr := h.client.VerifyPayment(verifyCtx, VerifyPaymentInput{
+		Authority: *item.Authority,
+		Amount:    item.Amount,
+	})
+	stop()
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if verifyErr == nil && (out.Code == codeSuccess || out.Code == codeAlreadyVerified) && out.RefID > 0 {
+		_, err = h.repository.FinalizeVerifiedPayment(persistCtx, *item.Authority, out.RefID, out.Code)
+	} else {
+		var code *int
+		var rejection *ProviderError
+		if verifyErr == nil && out.Code < 0 {
+			code = &out.Code
+		} else if errors.As(verifyErr, &rejection) && rejection.Code < 0 {
+			code = &rejection.Code
+		}
+		_, err = h.repository.FinalizeFailedPayment(persistCtx, *item.Authority, code)
+	}
+	if err != nil {
+		return Reconciliation{}, err
+	}
+	item, err = h.repository.GetReconciliation(persistCtx, attemptID)
+	return h.reconciliationAvailability(item), err
+}
+
+func (h *Handler) AdminReconcile(w http.ResponseWriter, r *http.Request) {
+	if !h.adminReconciliationAccess(w, r) {
+		return
+	}
+	attemptID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || attemptID <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.ReconcilePayment(r.Context(), attemptID)
+	if err != nil {
+		if errors.Is(err, ErrAttemptNotFound) {
+			http.Error(w, "payment attempt not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(item)
+}
+
 // AdminListAttempts returns every ZarinPal payment attempt for order {id},
 // newest first, for admin inspection (e.g. to show a ref_id on the admin
 // order detail page). Admin-only.

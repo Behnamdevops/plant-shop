@@ -68,6 +68,180 @@ func failingRequestClient() *fakeClient {
 	}
 }
 
+func TestAdminReconciliationRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason, outcome, status string
+		output                        VerifyPaymentOutput
+		verifyErr                     error
+	}{
+		{"success", "settled", "verified_success", StatusPaid, VerifyPaymentOutput{Code: 100, RefID: 991001}, nil},
+		{"already verified", "settled", "verified_success", StatusPaid, VerifyPaymentOutput{Code: 101, RefID: 991002}, nil},
+		{"timeout", "verification_uncertain", "uncertain", StatusPending, VerifyPaymentOutput{}, context.DeadlineExceeded},
+		{"rejected", "verification_rejected", "definitive_rejection", StatusPending, VerifyPaymentOutput{Code: -51}, nil},
+		{"provider error", "verification_rejected", "definitive_rejection", StatusPending, VerifyPaymentOutput{}, &ProviderError{Code: -51}},
+		{"missing reference", "verification_uncertain", "uncertain", StatusPending, VerifyPaymentOutput{Code: 100}, nil},
+		{"failed attempt", "settled", "verified_success", StatusPaid, VerifyPaymentOutput{Code: 100, RefID: 991003}, nil},
+		{"cancelled order", "refund_required", "manual_required", StatusReconciliation, VerifyPaymentOutput{Code: 100, RefID: 991004}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := succeedingClient()
+			env := newTestEnv(t, client)
+			cookie, email := env.registerAndLogin(t)
+			o := env.createOrder(t, cookie)
+			a := env.startPayment(t, cookie, o.ID)
+			if _, err := env.db.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE email = $1`, email); err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "failed attempt" {
+				if _, err := env.db.Exec(t.Context(), `UPDATE payment_attempts SET status = 'failed' WHERE id = $1`, a.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.name == "cancelled order" {
+				if _, err := env.db.Exec(t.Context(), `UPDATE orders SET status = 'cancelled' WHERE id = $1`, o.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			client.verifyFunc = func(ctx context.Context, in VerifyPaymentInput) (VerifyPaymentOutput, error) {
+				calls++
+				if in.Authority != *a.Authority || in.Amount != a.Amount {
+					t.Fatalf("verification did not use persisted binding: %+v", in)
+				}
+				return tc.output, tc.verifyErr
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/payments/1/reconcile", strings.NewReader(`{"amount":1,"ref_id":1}`))
+			req.SetPathValue("id", strconv.FormatInt(a.ID, 10))
+			req.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			env.handler.AdminReconcile(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			var item Reconciliation
+			if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
+				t.Fatal(err)
+			}
+			if item.Status != tc.status || item.Reason != tc.reason || item.LastOutcome != tc.outcome || item.LastCheckedAt == nil || calls != 1 {
+				t.Fatalf("unexpected result: %+v calls=%d", item, calls)
+			}
+			if strings.Contains(w.Body.String(), "account_key") {
+				t.Fatal("provider identity exposed")
+			}
+			wantPayment, wantOrder := "pending", "pending"
+			if tc.status == StatusPaid {
+				wantPayment = "paid"
+			}
+			if tc.name == "cancelled order" {
+				wantOrder = "cancelled"
+			}
+			env.assertOrderStock(t, o.ID, wantOrder, wantPayment, 9)
+			if tc.status == StatusPaid || tc.status == StatusReconciliation {
+				if _, err := env.handler.ReconcilePayment(t.Context(), a.ID); err != nil || calls != 1 {
+					t.Fatalf("terminal retry err=%v calls=%d", err, calls)
+				}
+			}
+		})
+	}
+}
+
+func TestAdminReconciliationAccessAndListing(t *testing.T) {
+	env := newTestEnv(t, succeedingClient())
+	cookie, email := env.registerAndLogin(t)
+	o := env.createOrder(t, cookie)
+	a := env.startPayment(t, cookie, o.ID)
+	for _, endpoint := range []struct {
+		method, path string
+		handler      http.HandlerFunc
+	}{
+		{http.MethodGet, "/api/v1/admin/payments/reconciliation", env.handler.AdminListReconciliations},
+		{http.MethodPost, "/api/v1/admin/payments/1/reconcile", env.handler.AdminReconcile},
+	} {
+		for _, authenticated := range []bool{false, true} {
+			req := httptest.NewRequest(endpoint.method, endpoint.path, nil)
+			req.SetPathValue("id", strconv.FormatInt(a.ID, 10))
+			want := http.StatusUnauthorized
+			if authenticated {
+				req.AddCookie(cookie)
+				want = http.StatusForbidden
+			}
+			w := httptest.NewRecorder()
+			endpoint.handler(w, req)
+			if w.Code != want {
+				t.Fatalf("access status=%d want=%d", w.Code, want)
+			}
+		}
+	}
+	if _, err := env.db.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE email = $1`, email); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"limit=0", "limit=101", "before_id=-1", "before_id=bad"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/payments/reconciliation?"+query, nil)
+		req.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		env.handler.AdminListReconciliations(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("query %s: status=%d", query, w.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/admin/payments/reconciliation?limit=1&before_id=%d", a.ID+1), nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	env.handler.AdminListReconciliations(w, req)
+	var items []Reconciliation
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil || w.Code != http.StatusOK || len(items) != 1 || items[0].ID != a.ID || !items[0].Retryable {
+		t.Fatalf("listing status=%d body=%s err=%v", w.Code, w.Body.String(), err)
+	}
+	for _, tc := range []struct {
+		id     string
+		status int
+	}{{"bad", 400}, {"0", 400}, {"9223372036854775807", 404}} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/payments/1/reconcile", nil)
+		req.SetPathValue("id", tc.id)
+		req.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		env.handler.AdminReconcile(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("id=%s status=%d want=%d", tc.id, w.Code, tc.status)
+		}
+	}
+}
+
+func TestReconciliationDoesNotVerifyUnsafeBindings(t *testing.T) {
+	for _, reason := range []string{"provider_binding_mismatch", "missing_authority", "payments_disabled"} {
+		t.Run(reason, func(t *testing.T) {
+			client := succeedingClient()
+			client.verifyFunc = func(context.Context, VerifyPaymentInput) (VerifyPaymentOutput, error) {
+				t.Fatal("unsafe attempt reached provider")
+				return VerifyPaymentOutput{}, nil
+			}
+			env := newTestEnv(t, client)
+			cookie, _ := env.registerAndLogin(t)
+			o := env.createOrder(t, cookie)
+			a, err := env.repository.CreateAttemptForOrder(t.Context(), o.UserID, o.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reason != "missing_authority" {
+				if err := env.repository.SetAuthority(t.Context(), a.ID, "A"+uniqueSuffixPayment()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if reason == "provider_binding_mismatch" {
+				env.repository.ConfigureProvider("live", "different")
+			}
+			if reason == "payments_disabled" {
+				env.handler.client = nil
+			}
+			item, err := env.handler.ReconcilePayment(t.Context(), a.ID)
+			if err != nil || item.Retryable || item.Reason != reason {
+				t.Fatalf("item=%+v err=%v", item, err)
+			}
+			env.assertOrderStock(t, o.ID, "pending", "pending", 9)
+		})
+	}
+}
+
 var paymentSeq int
 
 func uniqueSuffixPayment() string {

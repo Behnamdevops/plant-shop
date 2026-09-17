@@ -395,6 +395,9 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 			return AdminOrderWithItems{}, err
 		}
 		if blocked {
+			if paymentStatus == PaymentStatusPaid {
+				return AdminOrderWithItems{}, ErrRefundRequired
+			}
 			return AdminOrderWithItems{}, ErrInvalidTransition
 		}
 		if err := restoreOrderStock(ctx, tx, orderID); err != nil {

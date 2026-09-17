@@ -2,6 +2,7 @@ package order
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -197,6 +198,7 @@ var (
 	ErrProductNotFound   = errors.New("product not found")
 	ErrOrderNotFound     = errors.New("order not found")
 	ErrInvalidTransition = errors.New("invalid status transition")
+	ErrRefundRequired    = fmt.Errorf("%w: paid order cannot be cancelled: refund or manual reconciliation required", ErrInvalidTransition)
 
 	// ErrPaymentRequired is returned by UpdateStatus when an admin attempts
 	// to advance a ZarinPal order (payment_method = "zarinpal") into

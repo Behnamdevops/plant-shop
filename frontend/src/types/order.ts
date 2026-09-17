@@ -103,7 +103,7 @@ export type AdminOrderDetails = AdminOrderSummary & {
 // PaymentAttemptStatus mirrors the backend payment.Status* constants — a
 // smaller state machine than order status, scoped to a single ZarinPal
 // attempt.
-export type PaymentAttemptStatus = 'pending' | 'paid' | 'failed'
+export type PaymentAttemptStatus = 'pending' | 'paid' | 'failed' | 'reconciliation'
 
 // PaymentAttempt mirrors the backend's payment.Attempt, as returned by
 // GET /admin/orders/{id}/payments. Never includes card/bank details — only

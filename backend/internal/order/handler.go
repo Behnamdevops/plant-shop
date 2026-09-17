@@ -254,6 +254,8 @@ func (h *Handler) AdminUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrOrderNotFound):
 			http.Error(w, "order not found", http.StatusNotFound)
+		case errors.Is(err, ErrRefundRequired):
+			http.Error(w, "paid order cannot be cancelled: refund or manual reconciliation required", http.StatusConflict)
 		case errors.Is(err, ErrInvalidTransition):
 			http.Error(w, "invalid status transition", http.StatusConflict)
 		case errors.Is(err, ErrPaymentRequired):

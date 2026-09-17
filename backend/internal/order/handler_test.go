@@ -960,6 +960,87 @@ func TestHandlerAdminGetByIDIncludesFulfillmentFields(t *testing.T) {
 
 // ---------- Cancellation stock restoration ----------
 
+func TestHandlerAdminCancellationPaymentSafety(t *testing.T) {
+	env := newTestHandlerEnv(t)
+	t.Cleanup(env.db.Close)
+	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
+	buyer := env.registerAndLogin(t)
+
+	for _, method := range []string{PaymentMethodManual, PaymentMethodZarinPal} {
+		for _, paymentStatus := range []string{PaymentStatusPaid, PaymentStatusPending, PaymentStatusFailed, PaymentStatusRefunded} {
+			for _, status := range []string{StatusPending, StatusProcessing, StatusShipped, StatusDelivered, StatusCancelled} {
+				t.Run(method+"/"+paymentStatus+"/"+status, func(t *testing.T) {
+					o := env.createOrderForUser(t, buyer)
+					wantStock := 9
+					if status == StatusCancelled {
+						if _, err := env.handler.repository.UpdateStatus(t.Context(), o.ID, StatusCancelled); err != nil {
+							t.Fatalf("setup cancellation: %v", err)
+						}
+						wantStock = 10
+					}
+					if _, err := env.db.Exec(t.Context(), `
+						UPDATE orders SET status = $2, payment_status = $3, payment_method = $4 WHERE id = $1
+					`, o.ID, status, paymentStatus, method); err != nil {
+						t.Fatalf("set order state: %v", err)
+					}
+					before, err := env.handler.repository.GetByID(t.Context(), o.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(before.Items) != 1 {
+						t.Fatalf("items = %d, want 1", len(before.Items))
+					}
+					wantStatus := status
+					wantUpdatedAt := before.UpdatedAt
+					for attempt := 0; attempt < 2; attempt++ {
+						wantCode := http.StatusConflict
+						wantMessage := "invalid status transition\n"
+						if wantStatus == StatusPending || wantStatus == StatusProcessing {
+							switch paymentStatus {
+							case PaymentStatusPaid:
+								wantMessage = "paid order cannot be cancelled: refund or manual reconciliation required\n"
+							case PaymentStatusPending, PaymentStatusFailed:
+								wantCode = http.StatusOK
+								wantStatus, wantStock = StatusCancelled, 10
+							}
+						}
+						id := strconv.FormatInt(o.ID, 10)
+						req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orders/"+id+"/status", bytes.NewBufferString(`{"status":"cancelled"}`))
+						req.SetPathValue("id", id)
+						req.AddCookie(admin)
+						w := httptest.NewRecorder()
+						env.handler.AdminUpdateStatus(w, req)
+						if w.Code != wantCode {
+							t.Fatalf("attempt %d: status = %d, want %d, body=%s", attempt, w.Code, wantCode, w.Body.String())
+						}
+						if wantCode == http.StatusConflict && w.Body.String() != wantMessage {
+							t.Errorf("body = %q, want %q", w.Body.String(), wantMessage)
+						}
+						got, err := env.handler.repository.GetByID(t.Context(), o.ID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if got.Status != wantStatus || got.PaymentStatus != paymentStatus || got.PaymentMethod != method {
+							t.Fatalf("order state = %s/%s/%s, want %s/%s/%s", got.Status, got.PaymentStatus, got.PaymentMethod, wantStatus, paymentStatus, method)
+						}
+						if wantCode == http.StatusConflict && !got.UpdatedAt.Equal(wantUpdatedAt) {
+							t.Error("rejected cancellation changed updated_at")
+						}
+						wantUpdatedAt = got.UpdatedAt
+						var stock int
+						if err := env.db.QueryRow(t.Context(), `SELECT stock FROM products WHERE id = $1`, before.Items[0].ProductID).Scan(&stock); err != nil {
+							t.Fatal(err)
+						}
+						if stock != wantStock {
+							t.Fatalf("stock = %d, want %d", stock, wantStock)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestHandlerCancelPendingRestoresStock(t *testing.T) {
 	env := newTestHandlerEnv(t)
 	admin, _ := env.registerAndLoginWithRole(t, auth.RoleAdmin)
