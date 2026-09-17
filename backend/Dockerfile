@@ -27,6 +27,9 @@ RUN apk add --no-cache ca-certificates && \
 
 WORKDIR /app
 COPY --from=build /out/server /app/server
+# Migrations are applied by the same binary in production (APP_ENV=production)
+# before the HTTP server starts, or manually via `go run ./cmd/migrate`.
+COPY migrations /app/migrations
 
 ENV APP_ENV=production
 ENV PORT=8080

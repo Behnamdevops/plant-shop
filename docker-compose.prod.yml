@@ -61,7 +61,10 @@ services:
       ZARINPAL_SANDBOX: ${ZARINPAL_SANDBOX:-}
       ZARINPAL_LIVE_ENABLED: ${ZARINPAL_LIVE_ENABLED:-false}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      # /healthz is the cheap liveness probe; /readyz additionally verifies
+      # database connectivity with a short timeout. Use /readyz here so a
+      # broken database fails the container healthcheck.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
       interval: 10s
       timeout: 5s
       retries: 5
