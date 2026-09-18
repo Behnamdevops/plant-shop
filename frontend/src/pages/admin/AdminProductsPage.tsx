@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { deleteProduct, getProducts } from '../../api/products'
+import { getAdminCategories } from '../../api/categories'
 import { ApiError } from '../../api/errors'
 import type { Product } from '../../types/product'
+import type { Category } from '../../types/category'
 import { formatToman } from '../../lib/format'
+
+// Admin product management shows the full catalog, so it requests the
+// maximum page size instead of paginating — admins need to scan/manage all
+// products, unlike the public storefront where large catalogs must be
+// paginated server-side.
+const ADMIN_PAGE_SIZE = 100
 
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[] | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -20,11 +29,20 @@ export default function AdminProductsPage() {
   }
 
   useEffect(() => {
+    getAdminCategories()
+      .then(setCategories)
+      .catch(() => {
+        /* Category names are a display enhancement only; leave the column
+           blank if this fails rather than blocking the product list. */
+      })
+  }, [])
+
+  useEffect(() => {
     let ignore = false
 
-    getProducts()
+    getProducts({ page_size: ADMIN_PAGE_SIZE })
       .then((data) => {
-        if (!ignore) setProducts(data)
+        if (!ignore) setProducts(data.items)
       })
       .catch((err) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری محصولات پیش آمد')
@@ -37,6 +55,11 @@ export default function AdminProductsPage() {
       ignore = true
     }
   }, [reloadKey])
+
+  const categoryName = (categoryId: number | null) => {
+    if (categoryId === null) return '—'
+    return categories.find((c) => c.id === categoryId)?.name ?? '—'
+  }
 
   const handleDelete = async (product: Product) => {
     const confirmed = window.confirm(`محصول «${product.name}» حذف شود؟ این عمل قابل بازگشت نیست.`)
@@ -68,9 +91,14 @@ export default function AdminProductsPage() {
         <p className="page-subtitle">مدیریت فهرست محصولات فروشگاه.</p>
       </div>
 
-      <Link to="/admin/products/new" className="btn btn-primary">
-        + محصول جدید
-      </Link>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <Link to="/admin/products/new" className="btn btn-primary">
+          + محصول جدید
+        </Link>
+        <Link to="/admin/categories" className="btn btn-secondary">
+          مدیریت دسته‌بندی‌ها
+        </Link>
+      </div>
 
       {deleteError && (
         <p className="alert alert-error" role="alert">
@@ -102,6 +130,7 @@ export default function AdminProductsPage() {
               <tr>
                 <th>نام</th>
                 <th>Slug</th>
+                <th>دسته‌بندی</th>
                 <th>قیمت</th>
                 <th>موجودی</th>
                 <th></th>
@@ -112,6 +141,7 @@ export default function AdminProductsPage() {
                 <tr key={product.id}>
                   <td>{product.name}</td>
                   <td>{product.slug}</td>
+                  <td>{categoryName(product.category_id)}</td>
                   <td className="price">{formatToman(product.price)}</td>
                   <td>{product.stock}</td>
                   <td>

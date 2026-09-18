@@ -12,6 +12,7 @@ import (
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
+	"github.com/Behnamdevops/plant-shop/backend/internal/category"
 	"github.com/Behnamdevops/plant-shop/backend/internal/config"
 	"github.com/Behnamdevops/plant-shop/backend/internal/migrate"
 	"github.com/Behnamdevops/plant-shop/backend/internal/operational"
@@ -76,6 +77,9 @@ func run() error {
 	productRepository := product.NewRepository(db)
 	productHandler := product.NewHandler(productRepository, authHandler)
 
+	categoryRepository := category.NewRepository(db)
+	categoryHandler := category.NewHandler(categoryRepository, authHandler)
+
 	cartRepository := cart.NewRepository(db)
 	cartHandler := cart.NewHandler(cartRepository, authHandler)
 
@@ -111,6 +115,12 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/products/{id}", productHandler.GetByID)
 	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
 	mux.HandleFunc("DELETE /api/v1/admin/products/{id}", productHandler.Delete)
+
+	mux.HandleFunc("GET /api/v1/categories", categoryHandler.List)
+	mux.HandleFunc("GET /api/v1/admin/categories", categoryHandler.AdminList)
+	mux.HandleFunc("POST /api/v1/admin/categories", categoryHandler.Create)
+	mux.HandleFunc("PUT /api/v1/admin/categories/{id}", categoryHandler.Update)
+	mux.HandleFunc("DELETE /api/v1/admin/categories/{id}", categoryHandler.Delete)
 
 	mux.HandleFunc("GET /api/v1/cart", cartHandler.GetCart)
 	mux.HandleFunc("POST /api/v1/cart/items", cartHandler.AddItem)

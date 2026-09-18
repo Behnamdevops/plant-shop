@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { ProductInput } from '../../api/products'
 import type { Product } from '../../types/product'
+import type { Category } from '../../types/category'
+import { getAdminCategories } from '../../api/categories'
 
 type ProductFormProps = {
   initial?: Product
@@ -16,8 +18,19 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
   const [price, setPrice] = useState(initial ? String(initial.price) : '')
   const [stock, setStock] = useState(initial ? String(initial.stock) : '')
   const [imageUrl, setImageUrl] = useState(initial?.image_url ?? '')
+  const [categoryId, setCategoryId] = useState(initial?.category_id != null ? String(initial.category_id) : '')
+  const [categories, setCategories] = useState<Category[]>([])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    getAdminCategories()
+      .then(setCategories)
+      .catch(() => {
+        /* Category dropdown is optional; leave it empty (uncategorized-only)
+           if this fails rather than blocking the product form. */
+      })
+  }, [])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -51,6 +64,7 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
         price: priceNum,
         stock: stockNum,
         image_url: imageUrl.trim() || null,
+        category_id: categoryId ? Number(categoryId) : null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'مشکلی در ذخیره محصول پیش آمد')
@@ -125,6 +139,22 @@ export default function ProductForm({ initial, submitLabel, onSubmit }: ProductF
           value={imageUrl}
           onChange={(event) => setImageUrl(event.target.value)}
         />
+      </div>
+
+      <div className="form-field">
+        <label htmlFor="product-category">دسته‌بندی</label>
+        <select
+          id="product-category"
+          value={categoryId}
+          onChange={(event) => setCategoryId(event.target.value)}
+        >
+          <option value="">بدون دسته‌بندی</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && (

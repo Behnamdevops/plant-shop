@@ -129,10 +129,10 @@ func TestFreshAndIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if historyCount(t, conn) != 9 {
+	if historyCount(t, conn) != 10 {
 		t.Fatal("incomplete history")
 	}
-	if err := Run(t.Context(), conn, m[:8]); err == nil {
+	if err := Run(t.Context(), conn, m[:9]); err == nil {
 		t.Fatal("missing applied migration accepted")
 	}
 	m[0].Checksum = "changed"
