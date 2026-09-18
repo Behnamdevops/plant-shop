@@ -5,6 +5,7 @@ import { addCartItem } from '../api/cart'
 import type { Product } from '../types/product'
 import { useAuth } from '../hooks/useAuth'
 import { formatToman } from '../lib/format'
+import ProductImage from '../components/ProductImage'
 
 type ProductDetailsProps = {
   slug: string
@@ -88,13 +89,11 @@ function ProductDetails({ slug }: ProductDetailsProps) {
 
       <div className="product-detail">
         <div className="product-detail__media">
-          {product.image_url ? (
-            <img src={product.image_url} alt={product.name} />
-          ) : (
-            <span className="product-detail__media-placeholder" aria-hidden="true">
-              🌱
-            </span>
-          )}
+          <ProductImage
+            src={product.image_url}
+            alt={product.name}
+            placeholderClassName="product-detail__media-placeholder"
+          />
         </div>
 
         <div className="product-detail__info">

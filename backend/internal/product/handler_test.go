@@ -46,7 +46,7 @@ func newTestHandlerEnv(t *testing.T) *testHandlerEnv {
 	t.Cleanup(db.Close)
 
 	authHandler := auth.NewHandler(auth.NewRepository(db))
-	handler := NewHandler(NewRepository(db), authHandler)
+	handler := NewHandler(NewRepository(db), authHandler, nil)
 
 	return &testHandlerEnv{handler: handler, authHandler: authHandler, db: db}
 }

@@ -61,6 +61,13 @@ services:
       ZARINPAL_ENABLED: ${ZARINPAL_ENABLED:-false}
       ZARINPAL_SANDBOX: ${ZARINPAL_SANDBOX:-}
       ZARINPAL_LIVE_ENABLED: ${ZARINPAL_LIVE_ENABLED:-false}
+    volumes:
+      # Admin-uploaded product images. Backed by a dedicated named volume
+      # (never the postgres volume) so uploads survive container
+      # recreation/redeploys. Back this volume up separately from the
+      # database if uploaded images must be preserved across host loss —
+      # see OPERATIONS.md.
+      - uploads_data:/app/data/uploads
     healthcheck:
       # /healthz is the cheap liveness probe; /readyz additionally verifies
       # database connectivity with a short timeout. Use /readyz here so a
@@ -102,3 +109,5 @@ networks:
 volumes:
   postgres_data:
     name: plantshop_prod_postgres_data
+  uploads_data:
+    name: plantshop_prod_uploads_data

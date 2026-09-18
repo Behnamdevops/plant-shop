@@ -31,8 +31,15 @@ COPY --from=build /out/server /app/server
 # before the HTTP server starts, or manually via `go run ./cmd/migrate`.
 COPY migrations /app/migrations
 
+# Admin-uploaded product images are written here (see UPLOAD_DIR). In
+# docker-compose.prod.yml this path is backed by a dedicated named volume
+# so uploads survive container recreation. Owned by the unprivileged "app"
+# user the server runs as.
+RUN mkdir -p /app/data/uploads/products && chown -R app:app /app/data
+
 ENV APP_ENV=production
 ENV PORT=8080
+ENV UPLOAD_DIR=/app/data/uploads/products
 
 USER app
 EXPOSE 8080

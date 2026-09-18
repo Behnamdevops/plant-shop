@@ -151,6 +151,33 @@ npm run lint
 npm run build
 ```
 
+## Product image uploads
+
+Admins upload product images through the admin product form instead of
+typing a raw URL:
+
+- `POST /api/v1/admin/uploads/products` — admin-only, `multipart/form-data`
+  with a `file` field. Validates the file is a real JPEG/PNG/WebP image by
+  decoding its content (never trusting the filename or `Content-Type`
+  header), rejects anything over 5&nbsp;MB or empty, and stores it under a
+  randomly generated filename. Returns `{"url": "/uploads/products/<key>"}`.
+- `GET /uploads/products/<key>` — public, serves a previously uploaded
+  image. Only the exact generated-filename shape is ever read from disk;
+  arbitrary paths and directory listing are rejected.
+- `product.image_url` still accepts any URL (including external ones) for
+  backward compatibility — admins can still paste a URL if they don't want
+  to upload a file. Products can also have no image.
+- When an admin uploads a new image and saves the product, the previously
+  used **locally-managed** image (if any, and if no longer referenced) is
+  best-effort deleted after the database update succeeds. Externally
+  hosted image URLs are never touched. Image cleanup never runs before the
+  database write it depends on is confirmed, and is skipped entirely if
+  that write fails (e.g. a product blocked from deletion by existing
+  orders keeps its image).
+- See `backend/internal/storage` for the storage abstraction — an
+  S3-compatible `Store` implementation can be added later without
+  changing product or upload handler logic.
+
 ## Admin setup
 
 There is intentionally **no self-promotion endpoint or API** to grant the
@@ -177,6 +204,7 @@ Backend (`backend/.env.example`):
 | `ZARINPAL_MERCHANT_ID` | for payments | — | Your 36-character ZarinPal Merchant ID. Never commit a real value. |
 | `ZARINPAL_CALLBACK_URL` | for payments | — | Full URL ZarinPal redirects the browser back to; **must be a publicly reachable HTTPS domain in production** — see "ZarinPal payments in production" below. |
 | `ZARINPAL_SANDBOX` | no | unset (production) | Set to `true` to use ZarinPal's sandbox environment instead of real payments. |
+| `UPLOAD_DIR` | no | `data/uploads/products` (dev) / `/app/data/uploads/products` (Docker) | Directory admin-uploaded product images are written to and served from. |
 
 If `ZARINPAL_MERCHANT_ID`/`ZARINPAL_CALLBACK_URL` are unset, the payment
 endpoints stay registered but any request to them fails cleanly with a
@@ -224,6 +252,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 - **Database persistence**: Postgres data lives in the named volume
   `postgres_data`, which survives `docker compose down` (but not
   `docker compose down -v`).
+- **Uploaded image persistence**: admin-uploaded product images live in
+  the separate named volume `plantshop_prod_uploads_data`, mounted at
+  `/app/data/uploads` in the `backend` service. It also survives
+  `docker compose down` (not `-v`) and is never shared with the Postgres
+  volume. See `OPERATIONS.md` for backing it up.
 - **Migrations**: still applied manually. Once `postgres` is up, either
   `psql` in through a temporary port mapping, or run `psql` from inside the
   postgres container:

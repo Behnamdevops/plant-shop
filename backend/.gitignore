@@ -12,5 +12,9 @@
 cookies.txt
 *.local
 
+# Admin-uploaded product images (local filesystem storage backend).
+# Never commit uploaded binary content; see UPLOAD_DIR in .env.example.
+/data/uploads/
+
 # Editor/OS
 .DS_Store
