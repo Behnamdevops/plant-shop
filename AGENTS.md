@@ -34,3 +34,26 @@ go build ./... && go vet ./... && go test ./...   # no tests exist yet
 
 - `products.price` is `BIGINT NOT NULL CHECK (price >= 0)` mapped to Go `int64` (minor units); `stock INTEGER DEFAULT 0 CHECK (stock >= 0)`; `image_url TEXT NULL` → `*string`.
 - `slug` is `UNIQUE NOT NULL`; no `updated_at` trigger — callers must set it on writes.
+
+## Destructive operations
+
+Never run destructive database, Docker volume, or filesystem operations without
+explicit user approval.
+
+Forbidden by default:
+- docker compose down -v
+- docker volume rm
+- DROP DATABASE on the normal development database
+- deleting/recreating the development PostgreSQL volume
+- rm -rf on project/data directories
+- git reset --hard
+- git clean -fd
+
+Tests that require a clean database must create and use a separate disposable
+test database, preferably with a `_test` suffix.
+
+The normal development database and Docker volume must be treated as persistent
+user data, even if test fixtures are present.
+
+If a clean database is required and cannot be created safely, stop and ask the
+user rather than deleting existing data.
