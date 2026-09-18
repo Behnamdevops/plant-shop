@@ -17,6 +17,7 @@ type Config struct {
 	Port        string
 	Pool        *pgxpool.Config
 	Payment     payment.Config
+	UploadDir   string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -66,6 +67,10 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg.Payment, err = payment.LoadConfig(getenv)
 	if err != nil {
 		return Config{}, err
+	}
+	cfg.UploadDir = getenv("UPLOAD_DIR")
+	if cfg.UploadDir == "" {
+		cfg.UploadDir = "data/uploads/products"
 	}
 	callback := getenv("ZARINPAL_CALLBACK_URL")
 	if callback != "" {

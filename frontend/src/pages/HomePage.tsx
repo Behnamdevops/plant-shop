@@ -7,6 +7,7 @@ import type { Category } from '../types/category'
 import { storeConfig } from '../config'
 import { formatToman } from '../lib/format'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import ProductImage from '../components/ProductImage'
 
 const VALID_SORTS: ProductSort[] = ['newest', 'price_asc', 'price_desc', 'name_asc']
 const PAGE_SIZE = 20
@@ -275,13 +276,11 @@ export default function HomePage() {
               return (
                 <article key={product.id} className="card product-card">
                   <div className="product-card__media">
-                    {product.image_url ? (
-                      <img src={product.image_url} alt={product.name} />
-                    ) : (
-                      <span className="product-card__media-placeholder" aria-hidden="true">
-                        🌱
-                      </span>
-                    )}
+                    <ProductImage
+                      src={product.image_url}
+                      alt={product.name}
+                      placeholderClassName="product-card__media-placeholder"
+                    />
                   </div>
 
                   <div className="product-card__body">

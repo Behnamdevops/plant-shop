@@ -115,6 +115,37 @@ docker compose -f docker-compose.prod.yml logs -f frontend
 
 `request_id` is also set as the `X-Request-ID` response header.
 
+### Uploaded product images
+
+Admin-uploaded product images are stored on the local filesystem inside
+the `backend` container at `/app/data/uploads/products` (`UPLOAD_DIR`),
+backed by the dedicated `plantshop_prod_uploads_data` named volume. This
+volume is separate from `plantshop_prod_postgres_data` — never delete or
+recreate it casually; doing so permanently removes every uploaded image
+(products falling back to their `image_url` value, which becomes a dead
+link for any image that was locally uploaded).
+
+Images are served publicly (no auth) at `GET /uploads/products/<key>`,
+proxied by the frontend nginx (`location /uploads/`) straight through to
+the backend, which validates the key strictly before touching disk (see
+`backend/internal/upload/serve.go`).
+
+**Backup implications**: the database backup procedure above does **not**
+include uploaded image files. If uploaded images must survive host loss,
+back up the volume's contents separately, e.g.:
+
+```sh
+docker run --rm -v plantshop_prod_uploads_data:/data -v "$PWD/backups":/backup alpine \
+  tar czf /backup/uploads-$(date -u +%Y%m%dT%H%M%SZ).tar.gz -C /data .
+```
+
+Restore by extracting the archive back into a fresh volume before
+starting the backend. There is no automated orphan-image cleanup in V1:
+the backend best-effort deletes a product's previous local image when
+that product's image is replaced or the product itself is deleted, but
+does not run periodic garbage collection — treat rare orphaned files in
+this directory as a low-priority known limitation, not a bug.
+
 ### Database backup
 
 ```sh

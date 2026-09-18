@@ -19,6 +19,8 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
 	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
+	"github.com/Behnamdevops/plant-shop/backend/internal/storage"
+	"github.com/Behnamdevops/plant-shop/backend/internal/upload"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -74,8 +76,15 @@ func run() error {
 	// working without extra setup.
 	authHandler.SecureCookies = isProduction
 
+	imageStore, err := storage.NewLocalStore(cfg.UploadDir, "/uploads/products")
+	if err != nil {
+		return err
+	}
+
 	productRepository := product.NewRepository(db)
-	productHandler := product.NewHandler(productRepository, authHandler)
+	productHandler := product.NewHandler(productRepository, authHandler, imageStore)
+
+	uploadHandler := upload.NewHandler(imageStore, authHandler)
 
 	categoryRepository := category.NewRepository(db)
 	categoryHandler := category.NewHandler(categoryRepository, authHandler)
@@ -115,6 +124,14 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/products/{id}", productHandler.GetByID)
 	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
 	mux.HandleFunc("DELETE /api/v1/admin/products/{id}", productHandler.Delete)
+
+	// Admin-only image upload. Rate-limited more conservatively than
+	// general admin traffic since it does file I/O and image decoding.
+	mux.Handle("POST /api/v1/admin/uploads/products", limited(uploadHandler.UploadProductImage))
+	// Public, unauthenticated GET of previously uploaded images. Keys are
+	// generated, unpredictable filenames — no directory listing, no
+	// traversal, no arbitrary filesystem reads (see upload.FileServer).
+	mux.Handle("GET /uploads/products/{key}", upload.FileServer(imageStore.Dir))
 
 	mux.HandleFunc("GET /api/v1/categories", categoryHandler.List)
 	mux.HandleFunc("GET /api/v1/admin/categories", categoryHandler.AdminList)

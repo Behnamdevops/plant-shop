@@ -91,6 +91,32 @@ export async function updateProduct(id: number, input: ProductInput): Promise<Pr
   return response.json()
 }
 
+export type UploadImageResult = {
+  url: string
+}
+
+// uploadProductImage sends a single image file to the admin-only upload
+// endpoint and returns the public URL to store as the product's image_url.
+// The backend validates the file's actual content server-side; this
+// function does not attempt client-side format enforcement beyond the
+// browser's own file picker `accept` hint.
+export async function uploadProductImage(file: File): Promise<UploadImageResult> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch('/api/v1/admin/uploads/products', {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    return throwApiError(response)
+  }
+
+  return response.json()
+}
+
 export async function deleteProduct(id: number): Promise<void> {
   const response = await fetch(`/api/v1/admin/products/${id}`, {
     method: 'DELETE',

@@ -1,9 +1,11 @@
 package product
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,15 +23,53 @@ type authenticator interface {
 	RequireAdmin(r *http.Request) (int64, error)
 }
 
+// imageCleaner is the minimal capability the product handler needs from
+// the storage package: best-effort deletion of a previously
+// locally-managed image, plus recognizing whether a given image_url even
+// refers to a locally managed object in the first place (as opposed to an
+// external/legacy URL, which must never be touched). Depending on this
+// narrow interface â€” rather than the full storage.Store â€” keeps the
+// product package decoupled from storage/filesystem details.
+type imageCleaner interface {
+	Delete(ctx context.Context, key string) error
+	KeyFromURL(url string) (key string, ok bool)
+}
+
 type Handler struct {
 	repository *Repository
 	auth       authenticator
+	images     imageCleaner
 }
 
-func NewHandler(repository *Repository, authHandler *auth.Handler) *Handler {
+func NewHandler(repository *Repository, authHandler *auth.Handler, images imageCleaner) *Handler {
 	return &Handler{
 		repository: repository,
 		auth:       authHandler,
+		images:     images,
+	}
+}
+
+// cleanupImageIfUnused best-effort deletes the local image previously at
+// oldURL, but only if it is actually a locally-managed upload (KeyFromURL
+// returns ok=false for external/legacy URLs, which are left untouched) and
+// only if newURL no longer references that same image (so re-saving a
+// product without changing its image never deletes the file it still
+// needs). Deletion failures are logged, not surfaced to the caller: disk
+// cleanup is best-effort and must never affect the outcome of the request
+// that already succeeded at the database level.
+func (h *Handler) cleanupImageIfUnused(ctx context.Context, oldURL, newURL *string) {
+	if h.images == nil || oldURL == nil || *oldURL == "" {
+		return
+	}
+	if newURL != nil && *newURL == *oldURL {
+		return
+	}
+	key, ok := h.images.KeyFromURL(*oldURL)
+	if !ok {
+		return
+	}
+	if err := h.images.Delete(ctx, key); err != nil {
+		slog.Warn("failed to clean up old product image", "error", err.Error())
 	}
 }
 
@@ -238,6 +278,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch the product first so we know which image (if any) to clean up
+	// after a successful delete. The image must never be removed before
+	// the deletion outcome is known â€” if the product is referenced by
+	// existing orders, Delete fails and the image stays intact.
+	existing, getErr := h.repository.GetByID(r.Context(), id)
+
 	err = h.repository.Delete(r.Context(), id)
 	if err != nil {
 		switch {
@@ -249,6 +295,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
+	}
+
+	if getErr == nil {
+		h.cleanupImageIfUnused(r.Context(), existing.ImageURL, nil)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -279,7 +329,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// json.Unmarshal cannot distinguish "category_id omitted" from
-	// "category_id explicitly null" when the field is a *int64 — both
+	// "category_id explicitly null" when the field is a *int64 â€” both
 	// leave input.CategoryID as nil. Inspect the raw payload to tell them
 	// apart: only an explicit `"category_id": null` clears the category.
 	var raw map[string]json.RawMessage
@@ -329,6 +379,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the current image_url before updating so we can best-effort
+	// clean it up afterward. This must happen before the update, and the
+	// actual deletion must happen only after the update succeeds â€” never
+	// delete a previous locally-managed image before the database write
+	// that replaces it is confirmed.
+	var previousImageURL *string
+	if existing, getErr := h.repository.GetByID(r.Context(), id); getErr == nil {
+		previousImageURL = existing.ImageURL
+	}
+
 	product, err := h.repository.Update(r.Context(), id, input)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -346,6 +406,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	h.cleanupImageIfUnused(r.Context(), previousImageURL, product.ImageURL)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(product)

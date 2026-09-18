@@ -408,6 +408,43 @@
   border-color: var(--primary);
 }
 
+.form-field__hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.product-image-field__preview {
+  aspect-ratio: 4 / 3;
+  max-width: 220px;
+  background: var(--primary-light);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.product-image-field__preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.product-image-field__preview-placeholder {
+  font-size: 2.5rem;
+  color: var(--primary);
+  opacity: 0.5;
+}
+
+.state-message--inline {
+  padding: 0;
+  text-align: start;
+  font-size: 0.9rem;
+}
+
 .form-footer {
   margin-top: 16px;
   text-align: center;
