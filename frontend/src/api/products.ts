@@ -1,4 +1,4 @@
-import type { Product } from '../types/product'
+import type { Product, ProductListFilters, ProductListResult } from '../types/product'
 import { throwApiError } from './errors'
 
 export type ProductInput = {
@@ -8,10 +8,29 @@ export type ProductInput = {
   price: number
   stock: number
   image_url: string | null
+  category_id: number | null
 }
 
-export async function getProducts(): Promise<Product[]> {
-  const response = await fetch('/api/v1/products')
+// buildListQuery converts filters into URLSearchParams, omitting empty/undefined
+// values so the request URL stays clean and the backend's own defaults apply.
+function buildListQuery(filters: ProductListFilters): string {
+  const params = new URLSearchParams()
+
+  if (filters.q) params.set('q', filters.q)
+  if (filters.category) params.set('category', String(filters.category))
+  if (filters.in_stock) params.set('in_stock', 'true')
+  if (filters.min_price !== undefined) params.set('min_price', String(filters.min_price))
+  if (filters.max_price !== undefined) params.set('max_price', String(filters.max_price))
+  if (filters.sort) params.set('sort', filters.sort)
+  if (filters.page) params.set('page', String(filters.page))
+  if (filters.page_size) params.set('page_size', String(filters.page_size))
+
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export async function getProducts(filters: ProductListFilters = {}): Promise<ProductListResult> {
+  const response = await fetch(`/api/v1/products${buildListQuery(filters)}`)
 
   if (!response.ok) {
     return throwApiError(response)

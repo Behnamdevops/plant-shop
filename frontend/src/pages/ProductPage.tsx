@@ -102,10 +102,12 @@ function ProductDetails({ slug }: ProductDetailsProps) {
 
           <div className="product-detail__price-row">
             <span className="price">{formatToman(product.price)}</span>
-            {product.stock > 0 ? (
-              <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
-            ) : (
+            {product.stock <= 0 ? (
               <span className="badge badge-out-of-stock">ناموجود</span>
+            ) : product.stock <= 5 ? (
+              <span className="badge badge-limited-stock">تعداد محدود ({product.stock} عدد)</span>
+            ) : (
+              <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
             )}
           </div>
 

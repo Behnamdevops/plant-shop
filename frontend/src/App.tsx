@@ -3,6 +3,7 @@ import './App.css'
 import AdminRoute from './components/AdminRoute'
 import Header from './components/Header'
 import { AuthProvider } from './context/AuthProvider'
+import AdminCategoriesPage from './pages/admin/AdminCategoriesPage'
 import AdminOrderDetailPage from './pages/admin/AdminOrderDetailPage'
 import AdminOrdersPage from './pages/admin/AdminOrdersPage'
 import AdminPaymentReconciliationPage from './pages/admin/AdminPaymentReconciliationPage'
@@ -56,6 +57,14 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminProductEditPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/categories"
+              element={
+                <AdminRoute>
+                  <AdminCategoriesPage />
                 </AdminRoute>
               }
             />

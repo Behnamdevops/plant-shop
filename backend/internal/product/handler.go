@@ -3,6 +3,7 @@ package product
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,15 +50,92 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// parseListFilters validates and normalizes public-listing query
+// parameters. Invalid sort/pagination/price values return a descriptive
+// error so the handler can respond 400 instead of silently falling back
+// (falling back only applies to genuinely optional params like q).
+func parseListFilters(r *http.Request) (ListFilters, error) {
+	q := r.URL.Query()
+	filters := ListFilters{
+		Query:    strings.TrimSpace(q.Get("q")),
+		InStock:  q.Get("in_stock") == "true" || q.Get("in_stock") == "1",
+		Sort:     DefaultSort,
+		Page:     1,
+		PageSize: DefaultPageSize,
+	}
+
+	if sort := q.Get("sort"); sort != "" {
+		if !IsValidSort(sort) {
+			return ListFilters{}, errors.New("invalid sort value")
+		}
+		filters.Sort = sort
+	}
+
+	if categoryStr := q.Get("category"); categoryStr != "" {
+		categoryID, err := strconv.ParseInt(categoryStr, 10, 64)
+		if err != nil || categoryID <= 0 {
+			return ListFilters{}, errors.New("invalid category value")
+		}
+		filters.CategoryID = &categoryID
+	}
+
+	if minStr := q.Get("min_price"); minStr != "" {
+		minPrice, err := strconv.ParseInt(minStr, 10, 64)
+		if err != nil || minPrice < 0 {
+			return ListFilters{}, errors.New("invalid min_price value")
+		}
+		filters.MinPrice = &minPrice
+	}
+
+	if maxStr := q.Get("max_price"); maxStr != "" {
+		maxPrice, err := strconv.ParseInt(maxStr, 10, 64)
+		if err != nil || maxPrice < 0 {
+			return ListFilters{}, errors.New("invalid max_price value")
+		}
+		filters.MaxPrice = &maxPrice
+	}
+
+	if filters.MinPrice != nil && filters.MaxPrice != nil && *filters.MinPrice > *filters.MaxPrice {
+		return ListFilters{}, errors.New("min_price must be <= max_price")
+	}
+
+	if pageStr := q.Get("page"); pageStr != "" {
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			return ListFilters{}, errors.New("invalid page value")
+		}
+		filters.Page = page
+	}
+
+	if pageSizeStr := q.Get("page_size"); pageSizeStr != "" {
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			return ListFilters{}, errors.New("invalid page_size value")
+		}
+		if pageSize > MaxPageSize {
+			pageSize = MaxPageSize
+		}
+		filters.PageSize = pageSize
+	}
+
+	return filters, nil
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	products, err := h.repository.List(r.Context())
+	filters, err := parseListFilters(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.repository.List(r.Context(), filters)
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(products)
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +166,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrDuplicateSlug) {
 			http.Error(w, "slug must be unique", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrCategoryNotFound) {
+			http.Error(w, "category not found", http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -184,10 +266,29 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input UpdateProductInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	var input UpdateProductInput
+	if err := json.Unmarshal(body, &input); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// json.Unmarshal cannot distinguish "category_id omitted" from
+	// "category_id explicitly null" when the field is a *int64 — both
+	// leave input.CategoryID as nil. Inspect the raw payload to tell them
+	// apart: only an explicit `"category_id": null` clears the category.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err == nil {
+		if rawVal, present := raw["category_id"]; present && input.CategoryID == nil {
+			if strings.TrimSpace(string(rawVal)) == "null" {
+				input.ClearCategory = true
+			}
+		}
 	}
 
 	if input.Name == nil {
@@ -236,6 +337,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrDuplicateSlug) {
 			http.Error(w, "slug must be unique", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrCategoryNotFound) {
+			http.Error(w, "category not found", http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "internal server error", http.StatusInternalServerError)
