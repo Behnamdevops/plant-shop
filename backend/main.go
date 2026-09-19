@@ -12,6 +12,7 @@ import (
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/account"
 	"github.com/Behnamdevops/plant-shop/backend/internal/address"
+	"github.com/Behnamdevops/plant-shop/backend/internal/admin"
 	"github.com/Behnamdevops/plant-shop/backend/internal/article"
 	"github.com/Behnamdevops/plant-shop/backend/internal/articlecategory"
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
@@ -116,6 +117,10 @@ func run() error {
 	addressRepository := address.NewRepository(db)
 	addressHandler := address.NewHandler(addressRepository, authHandler)
 
+	// Admin handlers
+	adminRepository := admin.NewRepository(db)
+	adminHandler := admin.NewHandler(adminRepository, authHandler)
+
 	var zarinpalClient payment.Client
 	if paymentConfig.Enabled {
 		zarinpalClient = payment.NewZarinPalClient(paymentConfig.MerchantID, paymentConfig.Sandbox)
@@ -198,6 +203,12 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
 	mux.HandleFunc("GET /api/v1/admin/payments/reconciliation", paymentHandler.AdminListReconciliations)
 	mux.Handle("POST /api/v1/admin/payments/{id}/reconcile", limited(paymentHandler.AdminReconcile))
+
+	// Admin dashboard and inventory endpoints
+	mux.HandleFunc("GET /api/v1/admin/dashboard", adminHandler.Dashboard)
+	mux.HandleFunc("GET /api/v1/admin/inventory/low-stock", adminHandler.LowStock)
+	mux.Handle("POST /api/v1/admin/products/{id}/stock-adjustment", limited(http.HandlerFunc(adminHandler.StockAdjustment)))
+	mux.HandleFunc("GET /api/v1/admin/inventory/adjustments", adminHandler.InventoryAdjustments)
 
 	// Article categories - public and admin
 	articleCategoryRepository := articlecategory.NewRepository(db)

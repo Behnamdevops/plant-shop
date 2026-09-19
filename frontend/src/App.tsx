@@ -14,6 +14,8 @@ import AdminProductsPage from './pages/admin/AdminProductsPage'
 import AdminArticlesPage from './pages/admin/AdminArticlesPage'
 import AdminArticleFormPage from './pages/admin/AdminArticleFormPage'
 import AdminArticleCategoriesPage from './pages/admin/AdminArticleCategoriesPage'
+import AdminDashboardPage from './pages/admin/AdminDashboardPage'
+import AdminInventoryPage from './pages/admin/AdminInventoryPage'
 import AccountPage from './pages/AccountPage'
 import ProfilePage from './pages/ProfilePage'
 import AddressesPage from './pages/AddressesPage'
@@ -160,6 +162,22 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminArticleCategoriesPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminDashboardPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/inventory"
+              element={
+                <AdminRoute>
+                  <AdminInventoryPage />
                 </AdminRoute>
               }
             />
