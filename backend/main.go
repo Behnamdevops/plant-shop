@@ -20,6 +20,7 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/config"
 	"github.com/Behnamdevops/plant-shop/backend/internal/coupon"
 	"github.com/Behnamdevops/plant-shop/backend/internal/migrate"
+	"github.com/Behnamdevops/plant-shop/backend/internal/notification"
 	"github.com/Behnamdevops/plant-shop/backend/internal/operational"
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
 	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
@@ -97,7 +98,12 @@ func run() error {
 	cartRepository := cart.NewRepository(db)
 	cartHandler := cart.NewHandler(cartRepository, authHandler)
 
+	// Notifications
+	notificationRepository := notification.NewRepository(db)
+	notificationHandler := notification.NewHandler(notificationRepository, authHandler)
+
 	orderRepository := order.NewRepository(db)
+	orderRepository.WithNotifications(notificationRepository)
 	orderHandler := order.NewHandler(orderRepository, authHandler)
 
 	couponRepository := coupon.NewRepository(db)
@@ -115,6 +121,7 @@ func run() error {
 		zarinpalClient = payment.NewZarinPalClient(paymentConfig.MerchantID, paymentConfig.Sandbox)
 	}
 	paymentRepository := payment.NewRepository(db)
+	paymentRepository.WithNotifications(notificationRepository)
 	paymentHandler := payment.NewHandler(paymentRepository, authHandler, zarinpalClient, paymentConfig.CallbackURL, paymentConfig.FrontendBaseURL)
 
 	mux := http.NewServeMux()
@@ -182,6 +189,10 @@ func run() error {
 	mux.HandleFunc("POST /api/v1/admin/coupons", couponHandler.AdminCreate)
 	mux.HandleFunc("PUT /api/v1/admin/coupons/{id}", couponHandler.AdminUpdate)
 
+	mux.HandleFunc("GET /api/v1/admin/notifications", notificationHandler.List)
+	mux.HandleFunc("GET /api/v1/admin/notifications/{id}", notificationHandler.GetByID)
+	mux.HandleFunc("GET /api/v1/admin/notifications/count", notificationHandler.Count)
+
 	mux.Handle("POST /api/v1/orders/{id}/payments/zarinpal", limited(paymentHandler.RequestZarinPal))
 	mux.Handle("GET /api/v1/payments/zarinpal/callback", operational.RateLimit(120, time.Minute, http.HandlerFunc(paymentHandler.Callback), trustedProxy))
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
@@ -244,6 +255,28 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Start notification worker
+	var notificationWorker *notification.Worker
+	if cfg.Notification.Enabled {
+		var sender notification.Sender
+		if isProduction {
+			sender = notification.NewSMTPSender(
+				cfg.Notification.SMTPHost,
+				cfg.Notification.SMTPPort,
+				cfg.Notification.SMTPUsername,
+				cfg.Notification.SMTPPassword,
+				cfg.Notification.SMTPFromEmail,
+				cfg.Notification.SMTPFromName,
+				cfg.Notification.SMTPUseTLS,
+			)
+		} else {
+			// Development: use log sender instead of SMTP
+			sender = &notification.LogSender{}
+		}
+		notificationWorker = notification.NewWorker(notificationRepository, sender, notification.DefaultWorkerConfig())
+		notificationWorker.Start(ctx)
+	}
+
 	select {
 	case err := <-serverErrors:
 		if err != nil {
@@ -252,6 +285,13 @@ func run() error {
 	case <-ctx.Done():
 		stop()
 		slog.Info("shutdown signal received, draining connections")
+
+		// Stop notification worker
+		if notificationWorker != nil {
+			workerCtx, workerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer workerCancel()
+			notificationWorker.Stop(workerCtx)
+		}
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()

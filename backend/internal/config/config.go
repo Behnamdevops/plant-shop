@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/notification"
 	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,6 +20,7 @@ type Config struct {
 	Payment          payment.Config
 	UploadDir        string
 	ArticleUploadDir string
+	Notification     notification.Config
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -76,6 +78,10 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg.ArticleUploadDir = getenv("ARTICLE_UPLOAD_DIR")
 	if cfg.ArticleUploadDir == "" {
 		cfg.ArticleUploadDir = "data/uploads/articles"
+	}
+	cfg.Notification, err = notification.LoadConfig(getenv)
+	if err != nil {
+		return Config{}, err
 	}
 	callback := getenv("ZARINPAL_CALLBACK_URL")
 	if callback != "" {

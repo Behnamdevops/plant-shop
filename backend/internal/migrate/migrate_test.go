@@ -129,7 +129,7 @@ func TestFreshAndIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if historyCount(t, conn) != 12 {
+	if historyCount(t, conn) != 14 {
 		t.Fatal("incomplete history")
 	}
 	if err := Run(t.Context(), conn, m[:9]); err == nil {
