@@ -6,17 +6,56 @@ import (
 	"time"
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/coupon"
+	"github.com/Behnamdevops/plant-shop/backend/internal/notification"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repository struct {
-	db      *pgxpool.Pool
-	coupons *coupon.Repository
+	db           *pgxpool.Pool
+	coupons      *coupon.Repository
+	notifications *notification.Repository
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db, coupons: coupon.NewRepository(db)}
+}
+
+// WithNotifications sets the notification repository for the order repository.
+func (r *Repository) WithNotifications(notifRepo *notification.Repository) *Repository {
+	r.notifications = notifRepo
+	return r
+}
+
+// getOrderByID returns an order by ID along with its user's email for notification purposes.
+func (r *Repository) getOrderByID(ctx context.Context, orderID int64) (Order, string, error) {
+	var o Order
+	var email string
+
+	err := r.db.QueryRow(ctx, `
+		SELECT o.id, o.user_id, o.status, o.total, o.created_at, o.updated_at,
+			o.recipient_name, o.phone, o.address_line1, o.address_line2, o.city, o.postal_code, o.country,
+			o.shipping_method, o.shipping_fee, o.items_subtotal,
+			o.payment_status, o.payment_method,
+			o.coupon_code, o.discount_amount,
+			u.email
+		FROM orders o
+		JOIN users u ON u.id = o.user_id
+		WHERE o.id = $1
+	`, orderID).Scan(
+		&o.ID, &o.UserID, &o.Status, &o.Total, &o.CreatedAt, &o.UpdatedAt,
+		&o.RecipientName, &o.Phone, &o.AddressLine1, &o.AddressLine2, &o.City, &o.PostalCode, &o.Country,
+		&o.ShippingMethod, &o.ShippingFee, &o.ItemsSubtotal,
+		&o.PaymentStatus, &o.PaymentMethod,
+		&o.CouponCode, &o.DiscountAmount,
+		&email,
+	)
+
+	if err != nil {
+		return Order{}, "", err
+	}
+
+	return o, email, nil
 }
 
 // cartLine is a cart item joined with its current product data, used only
@@ -188,7 +227,99 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 	if err := tx.Commit(ctx); err != nil {
 		return Order{}, err
 	}
+
+	// Enqueue order_created notification after successful order creation
+	// This is done outside the transaction to avoid blocking SMTP calls
+	// but after the transaction commits to ensure the order exists
+	if r.notifications != nil {
+		_ = r.EnqueueOrderCreated(ctx, o.ID)
+	}
+
 	return o, nil
+}
+
+// EnqueueOrderCreated enqueues an order_created notification for the given order.
+// This should be called after a successful order creation to send the notification.
+func (r *Repository) EnqueueOrderCreated(ctx context.Context, orderID int64) error {
+	if r.notifications == nil {
+		return nil
+	}
+
+	o, email, err := r.getOrderByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+
+	// Get order items for the payload
+	rows, err := r.db.Query(ctx, `
+		SELECT product_id, product_name, product_slug, unit_price, quantity, subtotal
+		FROM order_items WHERE order_id = $1 ORDER BY id
+	`, orderID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var items []notification.OrderItem
+	for rows.Next() {
+		var item notification.OrderItem
+		if err := rows.Scan(&item.ProductID, &item.ProductName, &item.UnitPrice, &item.Quantity, &item.Subtotal); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	payload := notification.OrderCreatedPayload(orderID, "مشتری", email, o.Total, items)
+
+	return r.notifications.EnqueueTx(ctx, nil, notification.EventKey(orderID, "created"), o.UserID, email, notification.EventTypeOrderCreated, payload)
+}
+
+// EnqueueOrderCancelled enqueues an order_cancelled notification for the given order.
+func (r *Repository) EnqueueOrderCancelled(ctx context.Context, orderID int64) error {
+	if r.notifications == nil {
+		return nil
+	}
+
+	o, email, err := r.getOrderByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+
+	payload := notification.OrderCancelledPayload(orderID, "مشتری", email, o.Total)
+
+	return r.notifications.EnqueueTx(ctx, nil, notification.EventKey(orderID, "cancelled"), o.UserID, email, notification.EventTypeOrderCancelled, payload)
+}
+
+// EnqueueOrderStatus enqueues a notification for an order status transition.
+func (r *Repository) EnqueueOrderStatus(ctx context.Context, orderID int64, status string) error {
+	if r.notifications == nil {
+		return nil
+	}
+
+	o, email, err := r.getOrderByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+
+	payload := notification.OrderStatusPayload(orderID, "مشتری", email, status)
+	eventType := ""
+
+	switch status {
+	case "processing":
+		eventType = notification.EventTypeOrderProcessing
+	case "shipped":
+		eventType = notification.EventTypeOrderShipped
+	case "delivered":
+		eventType = notification.EventTypeOrderDelivered
+	default:
+		return nil
+	}
+
+	return r.notifications.EnqueueTx(ctx, nil, notification.EventKeyForOrderStatus(orderID, status), o.UserID, email, eventType, payload)
 }
 
 // nullableString returns nil for an empty string and a pointer to s
@@ -471,6 +602,12 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 		return AdminOrderWithItems{}, err
 	}
 
+	// Enqueue status transition notification after successful update
+	// (order_cancelled is handled separately in CancelOwnOrder/UpdateStatus)
+	if newStatus != StatusCancelled && r.notifications != nil {
+		_ = r.EnqueueOrderStatus(ctx, orderID, newStatus)
+	}
+
 	// Re-read the full record (with items/customer) outside the write
 	// transaction now that the update has committed.
 	return r.GetByID(ctx, orderID)
@@ -538,6 +675,11 @@ func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) 
 
 	if err := tx.Commit(ctx); err != nil {
 		return OrderWithItems{}, err
+	}
+
+	// Enqueue order_cancelled notification after successful cancellation
+	if r.notifications != nil {
+		_ = r.EnqueueOrderCancelled(ctx, orderID)
 	}
 
 	return r.GetByIDForUser(ctx, userID, orderID)

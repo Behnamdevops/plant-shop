@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/notification"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repository struct {
-	db          *pgxpool.Pool
-	environment string
-	identity    string
+	db           *pgxpool.Pool
+	environment  string
+	identity     string
+	notifications *notification.Repository
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
@@ -21,6 +23,12 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ConfigureProvider(environment, accountKey string) {
 	r.environment = environment
 	r.identity = accountKey
+}
+
+// WithNotifications sets the notification repository for the payment repository.
+func (r *Repository) WithNotifications(notifRepo *notification.Repository) *Repository {
+	r.notifications = notifRepo
+	return r
 }
 
 type orderForPayment struct {
@@ -219,6 +227,94 @@ type VerifyResult struct {
 	FinalStatus    string
 }
 
+// EnqueuePaymentSucceeded enqueues a payment_succeeded notification for the given order.
+func (r *Repository) EnqueuePaymentSucceeded(ctx context.Context, orderID int64) error {
+	if r.notifications == nil {
+		return nil
+	}
+
+	var email string
+	err := r.db.QueryRow(ctx, `
+		SELECT u.email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = $1
+	`, orderID).Scan(&email)
+	if err != nil {
+		return err
+	}
+
+	var total int64
+	err = r.db.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
+	if err != nil {
+		return err
+	}
+
+	payload := notification.PaymentSucceededPayload(orderID, "مشتری", email, total)
+
+	// Get a transaction for the notification enqueue
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO notification_outbox (event_key, user_id, recipient_email, event_type, payload)
+		SELECT $1, o.user_id, u.email, $2, $3
+		FROM orders o
+		JOIN users u ON u.id = o.user_id
+		WHERE o.id = $4
+		ON CONFLICT (event_key) DO NOTHING
+	`, notification.EventKey(orderID, "payment_succeeded"), notification.EventTypePaymentSucceeded, payload)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// EnqueuePaymentFailed enqueues a payment_failed notification for the given order.
+func (r *Repository) EnqueuePaymentFailed(ctx context.Context, orderID int64) error {
+	if r.notifications == nil {
+		return nil
+	}
+
+	var email string
+	err := r.db.QueryRow(ctx, `
+		SELECT u.email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = $1
+	`, orderID).Scan(&email)
+	if err != nil {
+		return err
+	}
+
+	var total int64
+	err = r.db.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
+	if err != nil {
+		return err
+	}
+
+	payload := notification.PaymentFailedPayload(orderID, "مشتری", email, total)
+
+	// Get a transaction for the notification enqueue
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO notification_outbox (event_key, user_id, recipient_email, event_type, payload)
+		SELECT $1, o.user_id, u.email, $2, $3
+		FROM orders o
+		JOIN users u ON u.id = o.user_id
+		WHERE o.id = $4
+		ON CONFLICT (event_key) DO NOTHING
+	`, notification.EventKey(orderID, "payment_failed"), notification.EventTypePaymentFailed, payload)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority string, refID int64, providerCode int) (VerifyResult, error) {
 	if refID <= 0 || providerCode != 100 && providerCode != 101 {
 		return VerifyResult{}, ErrInvalidVerification
@@ -286,6 +382,12 @@ func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority stri
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
 	}
+
+	// Enqueue payment_succeeded notification after successful settlement
+	if status == StatusPaid && r.notifications != nil {
+		_ = r.EnqueuePaymentSucceeded(ctx, a.OrderID)
+	}
+
 	return VerifyResult{OrderID: a.OrderID, FinalStatus: status}, nil
 }
 
@@ -426,5 +528,12 @@ func (r *Repository) FinalizeFailedPayment(ctx context.Context, authority string
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
 	}
+
+	// Enqueue payment_failed notification after authoritative failure
+	// Only enqueue if the payment is in a terminal failed state (not reconciliation)
+	if a.Status == StatusFailed && r.notifications != nil {
+		_ = r.EnqueuePaymentFailed(ctx, a.OrderID)
+	}
+
 	return VerifyResult{OrderID: a.OrderID, FinalStatus: a.Status}, nil
 }
