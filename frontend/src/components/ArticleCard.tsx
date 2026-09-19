@@ -19,7 +19,7 @@ export default function ArticleCard({
     <article className="article-card">
       {showImage && article.cover_image_url && (
         <div className="article-card__media">
-          <img src={article.cover_image_url} alt={article.title} />
+          <img src={article.cover_image_url} alt={article.title} loading="lazy" />
         </div>
       )}
       <div className="article-card__content">
