@@ -618,4 +618,3 @@ func TestRepositoryListAllIncludesUsageCount(t *testing.T) {
 		t.Errorf("expected usage_count 1, got %d", got.UsageCount)
 	}
 }
-

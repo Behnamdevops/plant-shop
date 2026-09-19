@@ -13,11 +13,12 @@ import (
 )
 
 type Config struct {
-	Environment string
-	Port        string
-	Pool        *pgxpool.Config
-	Payment     payment.Config
-	UploadDir   string
+	Environment      string
+	Port             string
+	Pool             *pgxpool.Config
+	Payment          payment.Config
+	UploadDir        string
+	ArticleUploadDir string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -71,6 +72,10 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg.UploadDir = getenv("UPLOAD_DIR")
 	if cfg.UploadDir == "" {
 		cfg.UploadDir = "data/uploads/products"
+	}
+	cfg.ArticleUploadDir = getenv("ARTICLE_UPLOAD_DIR")
+	if cfg.ArticleUploadDir == "" {
+		cfg.ArticleUploadDir = "data/uploads/articles"
 	}
 	callback := getenv("ZARINPAL_CALLBACK_URL")
 	if callback != "" {
