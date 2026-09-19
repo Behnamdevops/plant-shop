@@ -43,6 +43,18 @@ type Order struct {
 
 	PaymentStatus string `json:"payment_status"`
 	PaymentMethod string `json:"payment_method"`
+
+	// CouponCode and DiscountAmount are an immutable snapshot taken at
+	// checkout time (see coupon package). CouponCode is nil for orders
+	// that did not use a coupon (including every order placed before the
+	// Coupons & Discounts V1 migration, which are backfilled with NULL /
+	// 0). Historical display must always use this snapshot, never the
+	// coupon's current definition — a coupon can be edited or deactivated
+	// after an order that used it was placed, and that must never change
+	// what the order shows. DiscountAmount already only ever discounts
+	// ItemsSubtotal; Total = (ItemsSubtotal - DiscountAmount) + ShippingFee.
+	CouponCode     *string `json:"coupon_code"`
+	DiscountAmount int64   `json:"discount_amount"`
 }
 
 // Item is an immutable snapshot of a product at the time an order was
@@ -212,13 +224,35 @@ var (
 	// Customers may only self-cancel unpaid orders; a paid order requires
 	// admin-mediated cancellation/refund instead.
 	ErrOrderNotEligibleForCancel = errors.New("order is not eligible for self-service cancellation")
+
+	// ErrCouponInvalid is the sentinel wrapped by ErrCouponEligibility, so
+	// callers can check errors.Is(err, ErrCouponInvalid) without caring
+	// about the specific message.
+	ErrCouponInvalid = errors.New("coupon is not valid for this order")
 )
+
+// ErrCouponEligibility wraps a safe, customer-facing message describing
+// why a supplied coupon code was rejected during checkout (e.g. the coupon
+// became invalid, expired, or fully used between an earlier preview and
+// order submission). The order is never created when this is returned.
+type ErrCouponEligibility struct {
+	Message string
+}
+
+func (e *ErrCouponEligibility) Error() string { return e.Message }
+func (e *ErrCouponEligibility) Unwrap() error { return ErrCouponInvalid }
 
 // CheckoutInput is the user-provided portion of a checkout request: the
 // delivery snapshot and chosen shipping method. It intentionally has no
 // price/fee/total fields and no user id field — the authenticated user id
 // always comes from the session, and every price is calculated
 // server-side.
+// CouponCode is optional: an empty string (after trimming) means "no
+// coupon", preserving existing checkout behavior exactly when omitted. It
+// is never trusted as authoritative for the discount amount — only the
+// code itself is taken from the client; the actual discount is always
+// recalculated server-side from the coupon's current row inside the
+// checkout transaction (see coupon.Eligible).
 type CheckoutInput struct {
 	RecipientName  string
 	Phone          string
@@ -228,6 +262,7 @@ type CheckoutInput struct {
 	PostalCode     string
 	Country        string
 	ShippingMethod string
+	CouponCode     string
 }
 
 // Field length limits enforced on CheckoutInput, matching the column sizes
@@ -308,5 +343,6 @@ func (in CheckoutInput) Trimmed() CheckoutInput {
 		PostalCode:     strings.TrimSpace(in.PostalCode),
 		Country:        strings.TrimSpace(in.Country),
 		ShippingMethod: strings.TrimSpace(in.ShippingMethod),
+		CouponCode:     strings.TrimSpace(in.CouponCode),
 	}
 }

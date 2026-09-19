@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getCart } from '../api/cart'
+import { previewCoupon } from '../api/coupons'
 import { createOrder } from '../api/orders'
 import { requestZarinPalPayment } from '../api/payments'
 import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
+import type { CouponPreview } from '../types/coupon'
 import { emptyCheckoutInput, SHIPPING_FEES } from '../types/checkout'
 import type { CheckoutInput } from '../types/checkout'
 import { SHIPPING_METHODS } from '../types/order'
@@ -31,6 +33,16 @@ export default function CheckoutPage() {
   // button/message can say something more specific ("در حال انتقال به
   // درگاه پرداخت...") than the generic "در حال ثبت سفارش...".
   const [redirecting, setRedirecting] = useState(false)
+
+  // Coupon state. `appliedCoupon` holds the last successful preview — it is
+  // shown to the customer for the estimated breakdown ONLY. The actual
+  // discount used to create the order is always recalculated server-side
+  // inside the checkout transaction; this preview is never sent as an
+  // authoritative amount.
+  const [couponInput, setCouponInput] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreview | null>(null)
+  const [couponLoading, setCouponLoading] = useState(false)
+  const [couponError, setCouponError] = useState('')
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -64,6 +76,34 @@ export default function CheckoutPage() {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim()
+    if (!code) {
+      return
+    }
+    setCouponError('')
+    setCouponLoading(true)
+    try {
+      const preview = await previewCoupon(code)
+      setAppliedCoupon(preview)
+    } catch (err) {
+      setAppliedCoupon(null)
+      if (err instanceof ApiError && (err.status === 400 || err.status === 404)) {
+        setCouponError(err.message || 'این کد تخفیف معتبر نیست.')
+      } else {
+        setCouponError('بررسی کد تخفیف با مشکل مواجه شد.')
+      }
+    } finally {
+      setCouponLoading(false)
+    }
+  }
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null)
+    setCouponInput('')
+    setCouponError('')
+  }
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setSubmitError('')
@@ -71,15 +111,25 @@ export default function CheckoutPage() {
 
     // Step 1: create the order. The order is created with payment_status
     // "pending" — it is never shown to the customer as paid at this point.
+    // The applied coupon's preview amount is NEVER sent — only the code
+    // itself — and the backend always revalidates/recalculates the
+    // discount from scratch inside the checkout transaction.
+    const checkoutInput: CheckoutInput = appliedCoupon ? { ...form, coupon_code: appliedCoupon.code } : form
     let orderId: number
     try {
-      const order = await createOrder(form)
+      const order = await createOrder(checkoutInput)
       orderId = order.id
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else if (err instanceof ApiError && err.status === 400) {
+        // A 400 here can also mean the coupon became invalid/used between
+        // preview and submission. Show the backend's message and drop the
+        // coupon so the customer can immediately retry without it.
         setSubmitError(err.message || 'لطفاً اطلاعات ارسال را بررسی و دوباره تلاش کنید.')
+        if (appliedCoupon) {
+          setAppliedCoupon(null)
+        }
       } else if (err instanceof ApiError && err.status === 409) {
         setSubmitError('موجودی برخی از کالاها کافی نیست.')
       } else {
@@ -167,7 +217,8 @@ export default function CheckoutPage() {
 
   const shippingFee = SHIPPING_FEES[form.shipping_method]
   const itemsSubtotal = cart.total
-  const estimatedTotal = itemsSubtotal + shippingFee
+  const discountAmount = appliedCoupon ? appliedCoupon.discount_amount : 0
+  const estimatedTotal = itemsSubtotal - discountAmount + shippingFee
 
   const busy = submitting || redirecting
 
@@ -331,17 +382,61 @@ export default function CheckoutPage() {
             </table>
           </div>
 
+          <div className="form-field">
+            <label htmlFor="coupon-code">کد تخفیف</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                id="coupon-code"
+                type="text"
+                value={couponInput}
+                onChange={(e) => setCouponInput(e.target.value)}
+                disabled={busy || couponLoading || !!appliedCoupon}
+                placeholder="کد تخفیف را وارد کنید"
+              />
+              {appliedCoupon ? (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={handleRemoveCoupon} disabled={busy}>
+                  حذف کد تخفیف
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleApplyCoupon}
+                  disabled={busy || couponLoading || !couponInput.trim()}
+                >
+                  {couponLoading ? 'در حال بررسی...' : 'اعمال کد تخفیف'}
+                </button>
+              )}
+            </div>
+            {couponError && (
+              <p className="alert alert-error" role="alert">
+                {couponError}
+              </p>
+            )}
+            {appliedCoupon && (
+              <p className="alert" role="status">
+                کد تخفیف «{appliedCoupon.code}» اعمال شد.
+              </p>
+            )}
+          </div>
+
           <div className="checkout-summary__totals">
             <div className="checkout-summary__row">
-              <span>جمع جزء کالاها</span>
+              <span>جمع کالاها</span>
               <span className="price">{formatToman(itemsSubtotal)}</span>
             </div>
+            {appliedCoupon && (
+              <div className="checkout-summary__row">
+                <span>تخفیف</span>
+                <span className="price">-{formatToman(discountAmount)}</span>
+              </div>
+            )}
             <div className="checkout-summary__row">
               <span>هزینه ارسال ({shippingMethodLabel(form.shipping_method)})</span>
               <span className="price">{formatToman(shippingFee)}</span>
             </div>
             <div className="checkout-summary__row checkout-summary__row--total">
-              <span>جمع کل (تخمینی)</span>
+              <span>مبلغ نهایی (تخمینی)</span>
               <span className="price">{formatToman(estimatedTotal)}</span>
             </div>
           </div>

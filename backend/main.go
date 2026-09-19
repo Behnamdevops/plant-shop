@@ -14,6 +14,7 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
 	"github.com/Behnamdevops/plant-shop/backend/internal/category"
 	"github.com/Behnamdevops/plant-shop/backend/internal/config"
+	"github.com/Behnamdevops/plant-shop/backend/internal/coupon"
 	"github.com/Behnamdevops/plant-shop/backend/internal/migrate"
 	"github.com/Behnamdevops/plant-shop/backend/internal/operational"
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
@@ -95,6 +96,9 @@ func run() error {
 	orderRepository := order.NewRepository(db)
 	orderHandler := order.NewHandler(orderRepository, authHandler)
 
+	couponRepository := coupon.NewRepository(db)
+	couponHandler := coupon.NewHandler(couponRepository, cartRepository, authHandler)
+
 	var zarinpalClient payment.Client
 	if paymentConfig.Enabled {
 		zarinpalClient = payment.NewZarinPalClient(paymentConfig.MerchantID, paymentConfig.Sandbox)
@@ -152,6 +156,12 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/orders", orderHandler.AdminList)
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
 	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
+
+	mux.Handle("POST /api/v1/coupons/preview", limited(couponHandler.Preview))
+	mux.HandleFunc("GET /api/v1/admin/coupons", couponHandler.AdminList)
+	mux.HandleFunc("GET /api/v1/admin/coupons/{id}", couponHandler.AdminGetByID)
+	mux.HandleFunc("POST /api/v1/admin/coupons", couponHandler.AdminCreate)
+	mux.HandleFunc("PUT /api/v1/admin/coupons/{id}", couponHandler.AdminUpdate)
 
 	mux.Handle("POST /api/v1/orders/{id}/payments/zarinpal", limited(paymentHandler.RequestZarinPal))
 	mux.Handle("GET /api/v1/payments/zarinpal/callback", operational.RateLimit(120, time.Minute, http.HandlerFunc(paymentHandler.Callback), trustedProxy))
