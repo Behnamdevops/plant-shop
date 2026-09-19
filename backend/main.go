@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/article"
+	"github.com/Behnamdevops/plant-shop/backend/internal/articlecategory"
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/Behnamdevops/plant-shop/backend/internal/cart"
 	"github.com/Behnamdevops/plant-shop/backend/internal/category"
@@ -168,6 +170,38 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}/payments", paymentHandler.AdminListAttempts)
 	mux.HandleFunc("GET /api/v1/admin/payments/reconciliation", paymentHandler.AdminListReconciliations)
 	mux.Handle("POST /api/v1/admin/payments/{id}/reconcile", limited(paymentHandler.AdminReconcile))
+
+	// Article categories - public and admin
+	articleCategoryRepository := articlecategory.NewRepository(db)
+	articleCategoryHandler := articlecategory.NewHandler(articleCategoryRepository, authHandler)
+
+	mux.HandleFunc("GET /api/v1/article-categories", articleCategoryHandler.List)
+	mux.HandleFunc("GET /api/v1/admin/article-categories", articleCategoryHandler.AdminList)
+	mux.HandleFunc("POST /api/v1/admin/article-categories", articleCategoryHandler.Create)
+	mux.HandleFunc("PUT /api/v1/admin/article-categories/{id}", articleCategoryHandler.Update)
+	mux.HandleFunc("DELETE /api/v1/admin/article-categories/{id}", articleCategoryHandler.Delete)
+
+	// Articles storage and handlers
+	articleImageStore, err := storage.NewLocalStore(cfg.ArticleUploadDir, "/uploads/articles")
+	if err != nil {
+		return err
+	}
+
+	articleRepository := article.NewRepository(db)
+	articleHandler := article.NewHandler(articleRepository, authHandler, articleImageStore, db)
+
+	mux.HandleFunc("GET /api/v1/articles", articleHandler.List)
+	mux.HandleFunc("GET /api/v1/articles/{slug}", articleHandler.GetBySlug)
+	mux.HandleFunc("GET /api/v1/admin/articles", articleHandler.AdminList)
+	mux.HandleFunc("GET /api/v1/admin/articles/{id}", articleHandler.AdminGetByID)
+	mux.HandleFunc("POST /api/v1/admin/articles", articleHandler.Create)
+	mux.HandleFunc("PUT /api/v1/admin/articles/{id}", articleHandler.Update)
+	mux.HandleFunc("DELETE /api/v1/admin/articles/{id}", articleHandler.Delete)
+
+	// Article image upload
+	articleUploadHandler := upload.NewHandler(articleImageStore, authHandler)
+	mux.Handle("POST /api/v1/admin/uploads/articles", limited(articleUploadHandler.UploadProductImage))
+	mux.Handle("GET /uploads/articles/{key}", upload.FileServer(articleImageStore.Dir))
 
 	srv := &http.Server{
 		Addr:              ":" + port,

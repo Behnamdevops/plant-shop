@@ -68,6 +68,8 @@ services:
       # database if uploaded images must be preserved across host loss —
       # see OPERATIONS.md.
       - uploads_data:/app/data/uploads
+      # Article cover images
+      - article_uploads_data:/app/data/uploads/articles
     healthcheck:
       # /healthz is the cheap liveness probe; /readyz additionally verifies
       # database connectivity with a short timeout. Use /readyz here so a
@@ -111,3 +113,5 @@ volumes:
     name: plantshop_prod_postgres_data
   uploads_data:
     name: plantshop_prod_uploads_data
+  article_uploads_data:
+    name: plantshop_prod_article_uploads_data

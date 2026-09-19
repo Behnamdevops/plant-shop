@@ -21,6 +21,7 @@ export default function Header() {
       </Link>
 
       <nav className="site-header__nav">
+        <Link to="/articles">مقالات</Link>
         <Link to="/cart">سبد خرید</Link>
         {loading ? null : user ? (
           <>
@@ -28,6 +29,8 @@ export default function Header() {
             {user.role === 'admin' && (
               <>
                 <Link to="/admin/products">مدیریت محصولات</Link>
+                <Link to="/admin/articles">مدیریت مقالات</Link>
+                <Link to="/admin/article-categories">دسته‌بندی مقالات</Link>
                 <Link to="/admin/orders">مدیریت سفارش‌ها</Link>
                 <Link to="/admin/coupons">کدهای تخفیف</Link>
                 <Link to="/admin/payments/reconciliation">مغایرت‌گیری پرداخت‌ها</Link>

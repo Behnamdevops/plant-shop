@@ -11,6 +11,11 @@ import AdminPaymentReconciliationPage from './pages/admin/AdminPaymentReconcilia
 import AdminProductCreatePage from './pages/admin/AdminProductCreatePage'
 import AdminProductEditPage from './pages/admin/AdminProductEditPage'
 import AdminProductsPage from './pages/admin/AdminProductsPage'
+import AdminArticlesPage from './pages/admin/AdminArticlesPage'
+import AdminArticleFormPage from './pages/admin/AdminArticleFormPage'
+import AdminArticleCategoriesPage from './pages/admin/AdminArticleCategoriesPage'
+import ArticlesPage from './pages/ArticlesPage'
+import ArticlePage from './pages/ArticlePage'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import HomePage from './pages/HomePage'
@@ -37,6 +42,8 @@ function App() {
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
             <Route path="/payment/result" element={<PaymentResultPage />} />
+            <Route path="/articles" element={<ArticlesPage />} />
+            <Route path="/articles/:slug" element={<ArticlePage />} />
             <Route
               path="/admin/products"
               element={
@@ -98,6 +105,38 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminOrderDetailPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/articles"
+              element={
+                <AdminRoute>
+                  <AdminArticlesPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/articles/new"
+              element={
+                <AdminRoute>
+                  <AdminArticleFormPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/articles/:id/edit"
+              element={
+                <AdminRoute>
+                  <AdminArticleFormPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/article-categories"
+              element={
+                <AdminRoute>
+                  <AdminArticleCategoriesPage />
                 </AdminRoute>
               }
             />
