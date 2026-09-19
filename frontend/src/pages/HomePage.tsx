@@ -1,286 +1,179 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { getProducts } from '../api/products'
 import { getCategories } from '../api/categories'
-import type { Product, ProductSort } from '../types/product'
+import { getArticles } from '../api/articles'
+import type { Product } from '../types/product'
+import type { Article } from '../api/articles'
 import type { Category } from '../types/category'
 import { storeConfig } from '../config'
 import { formatToman } from '../lib/format'
-import { useDebouncedValue } from '../hooks/useDebouncedValue'
-import ProductImage from '../components/ProductImage'
-
-const VALID_SORTS: ProductSort[] = ['newest', 'price_asc', 'price_desc', 'name_asc']
-const PAGE_SIZE = 20
-
-const SORT_LABELS: Record<ProductSort, string> = {
-  newest: 'جدیدترین',
-  price_asc: 'قیمت: کم به زیاد',
-  price_desc: 'قیمت: زیاد به کم',
-  name_asc: 'نام: الف تا ی',
-}
-
-function isValidSort(value: string | null): value is ProductSort {
-  return VALID_SORTS.includes(value as ProductSort)
-}
-
-function parsePositiveInt(value: string | null): number | undefined {
-  if (!value) return undefined
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
-}
-
-// stockLabel renders the Persian stock-status text shown on each card.
-// "تعداد محدود" (limited quantity) is shown for low remaining stock so
-// shoppers get a sense of urgency without exposing raw internal thresholds.
-function stockLabel(stock: number): { text: string; className: string } {
-  if (stock <= 0) return { text: 'ناموجود', className: 'badge-out-of-stock' }
-  if (stock <= 5) return { text: 'تعداد محدود', className: 'badge-limited-stock' }
-  return { text: 'موجود', className: 'badge-in-stock' }
-}
+import Hero from '../components/Hero'
+import SectionHeader from '../components/SectionHeader'
+import ArticleCard from '../components/ArticleCard'
+import StoreBenefitCard from '../components/StoreBenefitCard'
 
 export default function HomePage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-
-  // The free-text query has its own fast-updating local state so typing
-  // feels instant; it's debounced before being written to the URL (which
-  // is what actually triggers the API request).
-  const [queryInput, setQueryInput] = useState(searchParams.get('q') ?? '')
-  const debouncedQuery = useDebouncedValue(queryInput, 400)
-
-  const [minPriceInput, setMinPriceInput] = useState(searchParams.get('min_price') ?? '')
-  const [maxPriceInput, setMaxPriceInput] = useState(searchParams.get('max_price') ?? '')
-  const debouncedMinPrice = useDebouncedValue(minPriceInput, 400)
-  const debouncedMaxPrice = useDebouncedValue(maxPriceInput, 400)
-
   const [categories, setCategories] = useState<Category[]>([])
-
   const [products, setProducts] = useState<Product[]>([])
-  const [total, setTotal] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [articles, setArticles] = useState<Article[]>([])
+  
+  const [loadingProducts, setLoadingProducts] = useState(true)
+  const [loadingArticles, setLoadingArticles] = useState(true)
   const [error, setError] = useState('')
 
-  // Derived, validated filters straight from the URL — the single source
-  // of truth for everything except the debounced text inputs above.
-  const sort = isValidSort(searchParams.get('sort')) ? (searchParams.get('sort') as ProductSort) : 'newest'
-  const categoryParam = parsePositiveInt(searchParams.get('category'))
-  const inStock = searchParams.get('in_stock') === 'true'
-  const minPrice = parsePositiveInt(searchParams.get('min_price'))
-  const maxPrice = parsePositiveInt(searchParams.get('max_price'))
-  const page = Math.max(1, parsePositiveInt(searchParams.get('page')) ?? 1)
-  const q = searchParams.get('q') ?? ''
-
-  // Push a partial filter update into the URL. Any filter change other
-  // than page itself resets pagination back to page 1.
-  const updateParams = (patch: Record<string, string | undefined>, resetPage = true) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        for (const [key, value] of Object.entries(patch)) {
-          if (value === undefined || value === '') {
-            next.delete(key)
-          } else {
-            next.set(key, value)
-          }
-        }
-        if (resetPage) {
-          next.delete('page')
-        }
-        return next
-      },
-      { replace: true },
-    )
-  }
-
-  // Sync debounced text inputs into the URL once the user stops typing.
   useEffect(() => {
-    if (debouncedQuery !== q) {
-      updateParams({ q: debouncedQuery || undefined })
+    document.title = storeConfig.name + ' | گیاهات سالم برای زندگی سالم‌تر'
+    const descMeta = document.querySelector('meta[name="description"]')
+    if (descMeta) {
+      descMeta.setAttribute(
+        'content',
+        'فروشگاه آنلاین ' + storeConfig.name + ' - محصولات با کیفیت، آموزش‌های جامع و مشاوره گیاهان'
+      )
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQuery])
-
-  useEffect(() => {
-    const current = searchParams.get('min_price') ?? ''
-    if (debouncedMinPrice !== current) {
-      updateParams({ min_price: debouncedMinPrice || undefined })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedMinPrice])
-
-  useEffect(() => {
-    const current = searchParams.get('max_price') ?? ''
-    if (debouncedMaxPrice !== current) {
-      updateParams({ max_price: debouncedMaxPrice || undefined })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedMaxPrice])
+  }, [])
 
   useEffect(() => {
     getCategories()
       .then(setCategories)
       .catch(() => {
-        /* Category filter is a progressive enhancement; a failed fetch
-           just leaves the dropdown empty rather than breaking the page. */
+        /* Categories are optional */
       })
   }, [])
-
-  const filtersKey = useMemo(
-    () => JSON.stringify({ q, categoryParam, inStock, minPrice, maxPrice, sort, page }),
-    [q, categoryParam, inStock, minPrice, maxPrice, sort, page],
-  )
 
   useEffect(() => {
     let ignore = false
 
-    async function load() {
-      setLoading(true)
+    async function loadProducts() {
+      setLoadingProducts(true)
       try {
-        const result = await getProducts({
-          q: q || undefined,
-          category: categoryParam,
-          in_stock: inStock || undefined,
-          min_price: minPrice,
-          max_price: maxPrice,
-          sort,
-          page,
-          page_size: PAGE_SIZE,
-        })
-        if (ignore) return
-        setProducts(result.items)
-        setTotal(result.total)
-        setTotalPages(result.total_pages)
-        setError('')
+        const result = await getProducts({ sort: 'newest', page_size: 6 })
+        if (!ignore) {
+          setProducts(result.items)
+        }
       } catch {
         if (!ignore) setError('مشکلی در بارگذاری محصولات پیش آمد')
       } finally {
-        if (!ignore) setLoading(false)
+        if (!ignore) setLoadingProducts(false)
       }
     }
 
-    load()
+    loadProducts()
 
     return () => {
       ignore = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey])
+  }, [])
 
-  const hasActiveFilters = Boolean(q || categoryParam || inStock || minPrice || maxPrice || sort !== 'newest')
+  useEffect(() => {
+    let ignore = false
 
-  const clearFilters = () => {
-    setQueryInput('')
-    setMinPriceInput('')
-    setMaxPriceInput('')
-    setSearchParams(new URLSearchParams(), { replace: true })
-  }
+    async function loadArticles() {
+      setLoadingArticles(true)
+      try {
+        const result = await getArticles({ page_size: 4 })
+        if (!ignore) {
+          setArticles(result.items)
+        }
+      } catch {
+        if (!ignore) {
+          /* Articles failure is non-critical */
+        }
+      } finally {
+        if (!ignore) setLoadingArticles(false)
+      }
+    }
 
-  const goToPage = (nextPage: number) => {
-    if (nextPage < 1 || (totalPages > 0 && nextPage > totalPages)) return
-    updateParams({ page: nextPage === 1 ? undefined : String(nextPage) }, false)
-  }
+    loadArticles()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  const featuredCategories = categories.slice(0, 4)
 
   return (
-    <main>
-      <div className="page-header">
-        <h1>{storeConfig.name}</h1>
-        <p className="page-subtitle">گیاهان سالم و تازه، تا در خانه شما.</p>
-      </div>
+    <div className="home-page">
+      {/* Hero Section */}
+      <Hero
+        title="گیاهان سالم، زندگی سالم‌تر"
+        subtitle="گیاهات اطراف خانه، محتوای آموزشی و محصولات انتخاب شده برای زندگی بهتر شما"
+        primaryText="مشاهده محصولات"
+        primaryLink="/shop"
+        secondaryText="مشاهده مقالات"
+        secondaryLink="/articles"
+      />
 
-      <div className="catalog-filters">
-        <input
-          type="search"
-          className="catalog-filters__search"
-          placeholder="جستجوی محصول..."
-          value={queryInput}
-          onChange={(event) => setQueryInput(event.target.value)}
-          aria-label="جستجوی محصول"
-        />
-
-        <select
-          value={categoryParam ?? ''}
-          onChange={(event) => updateParams({ category: event.target.value || undefined })}
-          aria-label="دسته‌بندی"
-        >
-          <option value="">همه دسته‌بندی‌ها</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-
-        <label className="catalog-filters__checkbox">
-          <input
-            type="checkbox"
-            checked={inStock}
-            onChange={(event) => updateParams({ in_stock: event.target.checked ? 'true' : undefined })}
+      {/* Categories Section */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <SectionHeader
+            title="دسته‌بندی‌های محبوب"
+            subtitle="محصولات ما در دسته‌بندی‌های مختلف"
+            align="center"
+            linkTo="/shop"
+            linkText="مشاهده همه"
           />
-          فقط موجود
-        </label>
-
-        <input
-          type="number"
-          min={0}
-          className="catalog-filters__price"
-          placeholder="حداقل قیمت"
-          value={minPriceInput}
-          onChange={(event) => setMinPriceInput(event.target.value)}
-          aria-label="حداقل قیمت (ریال)"
-        />
-
-        <input
-          type="number"
-          min={0}
-          className="catalog-filters__price"
-          placeholder="حداکثر قیمت"
-          value={maxPriceInput}
-          onChange={(event) => setMaxPriceInput(event.target.value)}
-          aria-label="حداکثر قیمت (ریال)"
-        />
-
-        <select value={sort} onChange={(event) => updateParams({ sort: event.target.value })} aria-label="مرتب‌سازی">
-          {VALID_SORTS.map((mode) => (
-            <option key={mode} value={mode}>
-              {SORT_LABELS[mode]}
-            </option>
-          ))}
-        </select>
-
-        {hasActiveFilters && (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={clearFilters}>
-            حذف فیلترها
-          </button>
-        )}
+          
+          {loadingProducts && !products.length ? (
+            <p className="state-message">در حال بارگذاری...</p>
+          ) : (
+            <div className="category-grid">
+              {featuredCategories.length === 0 ? (
+                <p className="empty-state">دسته‌بندی‌ای یافت نشد</p>
+              ) : (
+                featuredCategories.map((category) => (
+                  <Link
+                    key={category.id}
+                    to={`/shop?category=${category.id}`}
+                    className="category-card"
+                  >
+                    <div className="category-card__icon">🌱</div>
+                    <h3 className="category-card__title">{category.name}</h3>
+                    <p className="category-card__count">
+                      {category.slug === 'indoor-plants' ? 'گیاهات داخل خانه' :
+                       category.slug === 'outdoor-plants' ? 'گیاهات اطراف خانه' :
+                       category.slug === 'flowers' ? 'گل‌ها' :
+                       'گیاهات'}
+                    </p>
+                  </Link>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {loading && (
-        <p className="state-message">در حال بارگذاری محصولات...</p>
-      )}
+      {/* Featured Products Section */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <SectionHeader
+            title="محصولات پیشنهادی"
+            subtitle="جدیدترین و محبوب‌ترین محصولات ما"
+            align="center"
+            linkTo="/shop"
+            linkText="مشاهده همه محصولات"
+          />
 
-      {!loading && error && (
-        <p className="alert alert-error" role="alert">
-          {error}
-        </p>
-      )}
-
-      {!loading && !error && products.length === 0 && (
-        <p className="empty-state">محصولی با این فیلترها یافت نشد.</p>
-      )}
-
-      {!loading && !error && products.length > 0 && (
-        <>
-          <div className="product-grid">
-            {products.map((product) => {
-              const stock = stockLabel(product.stock)
-              return (
+          {loadingProducts && !products.length ? (
+            <p className="state-message">در حال بارگذاری محصولات...</p>
+          ) : (
+            <div className="product-grid">
+              {products.map((product) => (
                 <article key={product.id} className="card product-card">
                   <div className="product-card__media">
-                    <ProductImage
-                      src={product.image_url}
+                    <img
+                      src={product.image_url || ''}
                       alt={product.name}
-                      placeholderClassName="product-card__media-placeholder"
+                      className="product-card__media-img"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
                     />
+                    <span className="product-card__media-placeholder" aria-hidden="true">
+                      🌱
+                    </span>
                   </div>
 
                   <div className="product-card__body">
@@ -292,7 +185,13 @@ export default function HomePage() {
 
                     <div className="product-card__footer">
                       <span className="price">{formatToman(product.price)}</span>
-                      <span className={`badge ${stock.className}`}>{stock.text}</span>
+                      {product.stock <= 0 ? (
+                        <span className="badge badge-out-of-stock">ناموجود</span>
+                      ) : product.stock <= 5 ? (
+                        <span className="badge badge-limited-stock">تعداد محدود</span>
+                      ) : (
+                        <span className="badge badge-in-stock">موجود</span>
+                      )}
                     </div>
 
                     <Link to={`/products/${product.slug}`} className="btn btn-secondary btn-block">
@@ -300,28 +199,142 @@ export default function HomePage() {
                     </Link>
                   </div>
                 </article>
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          )}
 
-          <nav className="pagination" aria-label="صفحه‌بندی محصولات">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => goToPage(page - 1)} disabled={page <= 1}>
-              قبلی
-            </button>
-            <span className="pagination__status">
-              صفحه {page} از {Math.max(totalPages, 1)} ({total} محصول)
-            </span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => goToPage(page + 1)}
-              disabled={totalPages === 0 || page >= totalPages}
-            >
-              بعدی
-            </button>
-          </nav>
-        </>
-      )}
-    </main>
+          {!loadingProducts && products.length === 0 && !error && (
+            <p className="empty-state">محصولی یافت نشد</p>
+          )}
+        </div>
+      </div>
+
+      {/* Educational Content Section */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <div className="content-section content-section--centered">
+            <SectionHeader
+              title="آموزش و آگاهی"
+              subtitle="یاد بگیرید گیاهان خود را بهتر مراقبت کنید"
+              align="center"
+              linkTo="/articles"
+              linkText="مشاهده تمام مقالات"
+            />
+            <div className="content-promo">
+              <p>
+                دانش نگهداری از گیاهان کلید موفقیت شماست. ما مجموعه‌ای از مقالات آموزشی
+                برای همه سطوح داریم - از مبتدی تا حرفه‌ای.
+              </p>
+              <Link to="/articles" className="btn btn-primary">
+                شروع به یادگیری
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Latest Articles Section */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <SectionHeader
+            title="آخرین مقالات"
+            subtitle="مطالب جدید از دنیای گیاهان"
+            align="center"
+            linkTo="/articles"
+            linkText="مشاهده همه مقالات"
+          />
+
+          {loadingArticles && !articles.length ? (
+            <p className="state-message">در حال بارگذاری مقالات...</p>
+          ) : (
+            <div className="articles-grid">
+              {articles.map((article) => (
+                <ArticleCard key={article.id} article={article} showImage={false} />
+              ))}
+            </div>
+          )}
+
+          {!loadingArticles && articles.length === 0 && (
+            <p className="empty-state">مقاله‌ای یافت نشد</p>
+          )}
+        </div>
+      </div>
+
+      {/* Store Benefits Section */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <SectionHeader
+            title="چرا از ما انتخاب کنید؟"
+            align="center"
+          />
+          <div className="benefits-grid">
+            <StoreBenefitCard
+              title="ارسال مطمئن"
+              description="بسته‌بندی حرفه‌ای و ارسال ایمن برای سلامت گیاهان"
+            />
+            <StoreBenefitCard
+              title="گیاهان سالم"
+              description="فقط گیاهات با کیفیت و سالم ارائه می‌شود"
+            />
+            <StoreBenefitCard
+              title="راهنمای نگهداری"
+              description="آموزش‌های جامع برای مراقبت از گیاهان"
+            />
+            <StoreBenefitCard
+              title="خرید امن"
+              description="پرداخت آنلاین امن و راه‌های پشتیبانی متعدد"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Short FAQ Preview */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <SectionHeader
+            title="سوالات معمول"
+            align="center"
+            linkTo="/faq"
+            linkText="مشاهده تمام سوالات"
+          />
+          <div className="faq-preview">
+            <div className="faq-item">
+              <strong>چگونه سفارش دهم؟</strong>
+              <p>محصول مورد نظر را انتخاب کرده و دکمه «افزودن به سبد خرید» را بزنید.</p>
+            </div>
+            <div className="faq-item">
+              <strong>ارسال چقدر طول می‌کشد؟</strong>
+              <p>متوسط زمان ارسال ۱ تا ۳ روز کاری است.</p>
+            </div>
+            <div className="faq-item">
+              <strong>گیاه بیمار شد، چه کنم؟</strong>
+              <p>با پشتیبانی تماس بگیرید تا بهترین راهنمایی را دریافت کنید.</p>
+            </div>
+            <div className="faq-item">
+              <strong>بازگرداندن محصول؟</strong>
+              <p>در صورت آسیب در حمل، با ما تماس بگیرید.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Final CTA */}
+      <div className="marketing-section">
+        <div className="section-container">
+          <div className="final-cta">
+            <h2>آماده خرید هستید؟</h2>
+            <p>گیاهان سالم، زندگی سالم‌تری را آغاز کنید</p>
+            <div className="final-cta__buttons">
+              <Link to="/shop" className="btn btn-primary">
+                شروع خرید
+              </Link>
+              <Link to="/articles" className="btn btn-secondary">
+                آموزش‌ها
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
