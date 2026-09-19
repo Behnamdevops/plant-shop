@@ -14,6 +14,9 @@ import AdminProductsPage from './pages/admin/AdminProductsPage'
 import AdminArticlesPage from './pages/admin/AdminArticlesPage'
 import AdminArticleFormPage from './pages/admin/AdminArticleFormPage'
 import AdminArticleCategoriesPage from './pages/admin/AdminArticleCategoriesPage'
+import AccountPage from './pages/AccountPage'
+import ProfilePage from './pages/ProfilePage'
+import AddressesPage from './pages/AddressesPage'
 import AboutPage from './pages/AboutPage'
 import ArticlePage from './pages/ArticlePage'
 import ArticlesPage from './pages/ArticlesPage'
@@ -60,6 +63,10 @@ function App() {
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
             <Route path="/payment/result" element={<PaymentResultPage />} />
+            {/* Account V2 routes */}
+            <Route path="/account" element={<AccountPage />} />
+            <Route path="/account/profile" element={<ProfilePage />} />
+            <Route path="/account/addresses" element={<AddressesPage />} />
             <Route
               path="/admin/products"
               element={

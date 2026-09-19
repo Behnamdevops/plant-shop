@@ -61,6 +61,9 @@ export default function Header({ isPublic = false }: HeaderProps) {
 
         {loading ? null : user ? (
           <>
+            <Link to="/account" className="site-header__nav-link">
+              حساب کاربری
+            </Link>
             <Link to="/orders" className="site-header__nav-link">
               سفارش‌های من
             </Link>
