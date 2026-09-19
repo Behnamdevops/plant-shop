@@ -790,3 +790,320 @@ tbody tr:hover {
   color: var(--text-muted);
   font-size: 0.92rem;
 }
+/* ---------- Address Selector ---------- */
+
+.address-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.address-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.address-option:hover {
+  border-color: var(--primary-light);
+  background: var(--primary-bg);
+}
+
+.address-option input[type="radio"] {
+  margin-top: 4px;
+}
+
+.address-label {
+  flex: 1;
+  cursor: pointer;
+}
+
+.address-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.default-badge {
+  display: inline-block;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-right: 8px;
+}
+
+.address-details {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.address-full {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.form-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+  margin-bottom: 16px;
+}
+/* ---------- Account Pages ---------- */
+
+.account-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  margin-top: 24px;
+}
+
+@media (max-width: 768px) {
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.account-sidebar {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  height: fit-content;
+}
+
+.account-nav-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.account-nav-item {
+  margin-bottom: 8px;
+}
+
+.account-nav-item a {
+  display: block;
+  padding: 10px 12px;
+  color: var(--text);
+  text-decoration: none;
+  border-radius: var(--radius);
+  transition: background-color 0.15s ease;
+}
+
+.account-nav-item a:hover {
+  background: var(--primary-bg);
+  color: var(--primary-dark);
+}
+
+.account-nav-item.active a {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 500;
+}
+
+.account-content {
+  min-height: 400px;
+}
+
+.account-welcome {
+  background: var(--primary-bg);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid var(--primary-light);
+}
+
+.account-welcome h2 {
+  margin: 0 0 8px 0;
+  color: var(--primary-dark);
+}
+
+.account-welcome p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.account-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.account-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  border: 1px solid var(--border);
+}
+
+.account-card h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.account-card-content {
+  margin-bottom: 20px;
+}
+
+.account-card-content p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.account-card-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.account-info-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  border: 1px solid var(--border);
+  margin-top: 32px;
+}
+
+.account-info-card h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.account-info-content p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.disabled-input {
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.form-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 32px;
+  border: 1px solid var(--border);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.addresses-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.addresses-header h2 {
+  margin: 0;
+}
+
+.addresses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.address-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.address-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: var(--primary-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.address-card-header h4 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.address-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.address-card-content {
+  padding: 20px;
+}
+
+.address-card-content p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.address-date {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.empty-state-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 48px;
+  text-align: center;
+  border: 2px dashed var(--border);
+  margin-top: 24px;
+}
+
+.empty-state-card p {
+  margin: 0 0 24px 0;
+  color: var(--text-muted);
+}

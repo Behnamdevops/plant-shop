@@ -4,9 +4,11 @@ import { getCart } from '../api/cart'
 import { previewCoupon } from '../api/coupons'
 import { createOrder } from '../api/orders'
 import { requestZarinPalPayment } from '../api/payments'
+import { listAddresses } from '../api/addresses'
 import { ApiError } from '../api/errors'
 import type { Cart } from '../types/cart'
 import type { CouponPreview } from '../types/coupon'
+import type { Address } from '../api/addresses'
 import { emptyCheckoutInput, SHIPPING_FEES } from '../types/checkout'
 import type { CheckoutInput } from '../types/checkout'
 import { SHIPPING_METHODS } from '../types/order'
@@ -20,6 +22,8 @@ export default function CheckoutPage() {
   const navigate = useNavigate()
 
   const [cart, setCart] = useState<Cart | null>(null)
+  const [addresses, setAddresses] = useState<Address[]>([])
+  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [unauthorized, setUnauthorized] = useState(false)
@@ -51,9 +55,28 @@ export default function CheckoutPage() {
 
     let ignore = false
 
-    getCart()
-      .then((data) => {
-        if (!ignore) setCart(data)
+    Promise.all([getCart(), listAddresses()])
+      .then(([cartData, addressesData]) => {
+        if (!ignore) {
+          setCart(cartData)
+          setAddresses(addressesData)
+          // Set selected address to default if exists
+          const defaultAddress = addressesData.find(addr => addr.is_default)
+          if (defaultAddress) {
+            setSelectedAddressId(defaultAddress.id)
+            // Prefill form with default address
+            setForm(prev => ({
+              ...prev,
+              recipient_name: defaultAddress.recipient_name,
+              phone: defaultAddress.phone,
+              address_line1: defaultAddress.address_line1,
+              address_line2: defaultAddress.address_line2 || '',
+              city: defaultAddress.city,
+              postal_code: defaultAddress.postal_code,
+              country: defaultAddress.country,
+            }))
+          }
+        }
       })
       .catch((err) => {
         if (ignore) return
@@ -74,6 +97,24 @@ export default function CheckoutPage() {
 
   const handleChange = (field: keyof CheckoutInput) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
+    // When user manually edits a field, clear selected address
+    if (field !== 'coupon_code' && field !== 'shipping_method') {
+      setSelectedAddressId(null)
+    }
+  }
+
+  const handleAddressSelect = (address: Address) => {
+    setSelectedAddressId(address.id)
+    setForm({
+      ...form,
+      recipient_name: address.recipient_name,
+      phone: address.phone,
+      address_line1: address.address_line1,
+      address_line2: address.address_line2 || '',
+      city: address.city,
+      postal_code: address.postal_code,
+      country: address.country,
+    })
   }
 
   const handleApplyCoupon = async () => {
@@ -233,6 +274,43 @@ export default function CheckoutPage() {
       <div className="checkout-layout">
         <form className="form-card checkout-form" onSubmit={handleSubmit}>
           <h2>اطلاعات ارسال</h2>
+
+          {addresses.length > 0 && (
+            <div className="form-field">
+              <label>انتخاب از آدرس‌های ذخیره شده</label>
+              <div className="address-selector">
+                {addresses.map(address => (
+                  <div key={address.id} className="address-option">
+                    <input
+                      type="radio"
+                      id={`address-${address.id}`}
+                      name="saved-address"
+                      checked={selectedAddressId === address.id}
+                      onChange={() => handleAddressSelect(address)}
+                      disabled={busy}
+                    />
+                    <label htmlFor={`address-${address.id}`} className="address-label">
+                      <span className="address-title">
+                        {address.label || 'آدرس بدون عنوان'}
+                        {address.is_default && <span className="default-badge">پیش‌فرض</span>}
+                      </span>
+                      <span className="address-details">
+                        {address.recipient_name} — {address.phone}
+                      </span>
+                      <span className="address-full">
+                        {address.address_line1}
+                        {address.address_line2 && `، ${address.address_line2}`}
+                        {`، ${address.city}، ${address.postal_code}، ${address.country}`}
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <p className="form-hint">
+                انتخاب یک آدرس، فیلدهای زیر را پر می‌کند. می‌توانید پس از انتخاب، اطلاعات را ویرایش کنید.
+              </p>
+            </div>
+          )}
 
           <div className="form-field">
             <label htmlFor="recipient_name">نام گیرنده</label>

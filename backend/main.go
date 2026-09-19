@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/account"
+	"github.com/Behnamdevops/plant-shop/backend/internal/address"
 	"github.com/Behnamdevops/plant-shop/backend/internal/article"
 	"github.com/Behnamdevops/plant-shop/backend/internal/articlecategory"
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
@@ -101,6 +103,13 @@ func run() error {
 	couponRepository := coupon.NewRepository(db)
 	couponHandler := coupon.NewHandler(couponRepository, cartRepository, authHandler)
 
+	// Account V2 handlers
+	accountRepository := account.NewRepository(db)
+	accountHandler := account.NewHandler(accountRepository, authHandler)
+
+	addressRepository := address.NewRepository(db)
+	addressHandler := address.NewHandler(addressRepository, authHandler)
+
 	var zarinpalClient payment.Client
 	if paymentConfig.Enabled {
 		zarinpalClient = payment.NewZarinPalClient(paymentConfig.MerchantID, paymentConfig.Sandbox)
@@ -154,6 +163,14 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/orders", orderHandler.List)
 	mux.HandleFunc("GET /api/v1/orders/{id}", orderHandler.GetByID)
 	mux.HandleFunc("POST /api/v1/orders/{id}/cancel", orderHandler.Cancel)
+
+	// Account V2 endpoints
+	mux.HandleFunc("GET /api/v1/account/profile", accountHandler.GetProfile)
+	mux.HandleFunc("PUT /api/v1/account/profile", accountHandler.UpdateProfile)
+	mux.HandleFunc("GET /api/v1/account/addresses", addressHandler.List)
+	mux.HandleFunc("POST /api/v1/account/addresses", addressHandler.Create)
+	mux.HandleFunc("PUT /api/v1/account/addresses/{id}", addressHandler.Update)
+	mux.HandleFunc("DELETE /api/v1/account/addresses/{id}", addressHandler.Delete)
 
 	mux.HandleFunc("GET /api/v1/admin/orders", orderHandler.AdminList)
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
