@@ -56,6 +56,10 @@ type checkoutInput struct {
 	PostalCode     string `json:"postal_code"`
 	Country        string `json:"country"`
 	ShippingMethod string `json:"shipping_method"`
+	// CouponCode is optional. Only the code itself is ever taken from the
+	// request — discount_amount, coupon value, and final totals are never
+	// accepted from the client; they are always recalculated server-side.
+	CouponCode string `json:"coupon_code"`
 }
 
 func (in checkoutInput) toModel() CheckoutInput {
@@ -68,6 +72,7 @@ func (in checkoutInput) toModel() CheckoutInput {
 		PostalCode:     in.PostalCode,
 		Country:        in.Country,
 		ShippingMethod: in.ShippingMethod,
+		CouponCode:     in.CouponCode,
 	}
 }
 
@@ -103,6 +108,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	o, err := h.repository.CreateFromCart(r.Context(), userID, input)
 	if err != nil {
 		var verr *ErrValidation
+		var cerr *ErrCouponEligibility
 		switch {
 		case errors.Is(err, ErrEmptyCart):
 			http.Error(w, "cart is empty", http.StatusBadRequest)
@@ -110,6 +116,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "insufficient stock", http.StatusConflict)
 		case errors.Is(err, ErrProductNotFound):
 			http.Error(w, "product not found", http.StatusNotFound)
+		case errors.As(err, &cerr):
+			// The coupon became invalid/used between an earlier preview and
+			// this submission (or was never valid). The order is not
+			// created; the frontend should let the customer retry without
+			// the coupon.
+			http.Error(w, cerr.Error(), http.StatusBadRequest)
 		case errors.As(err, &verr):
 			http.Error(w, verr.Error(), http.StatusBadRequest)
 		default:

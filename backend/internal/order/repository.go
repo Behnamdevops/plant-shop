@@ -3,17 +3,20 @@ package order
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/Behnamdevops/plant-shop/backend/internal/coupon"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repository struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	coupons *coupon.Repository
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	return &Repository{db: db, coupons: coupon.NewRepository(db)}
 }
 
 // cartLine is a cart item joined with its current product data, used only
@@ -89,7 +92,37 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 	for _, l := range lines {
 		itemsSubtotal += l.Price * int64(l.Quantity)
 	}
-	total := itemsSubtotal + shippingFee
+
+	// Coupon validation/redemption happens inside this same transaction,
+	// after the coupon row has been locked (FOR UPDATE) and after the
+	// items subtotal above has been computed from the locked product
+	// rows. This is what makes usage_limit / per_user_limit race-safe:
+	// two concurrent checkouts against the same coupon serialize on the
+	// coupon row lock, so the second transaction always sees the first's
+	// committed redemption before deciding whether the limit still
+	// permits it. See coupon.Eligible for the full rule set. Discount is
+	// applied to itemsSubtotal only, never to shippingFee.
+	var discountAmount int64
+	var couponID *int64
+	var couponCode *string
+	trimmedCode := coupon.NormalizeCode(input.CouponCode)
+	if trimmedCode != "" {
+		c, discount, err := coupon.Eligible(ctx, tx, r.coupons, trimmedCode, userID, itemsSubtotal, time.Now())
+		if err != nil {
+			var eerr *coupon.EligibilityError
+			if errors.As(err, &eerr) {
+				return Order{}, &ErrCouponEligibility{Message: eerr.Message}
+			}
+			return Order{}, err
+		}
+		discountAmount = discount
+		id := c.ID
+		code := c.Code
+		couponID = &id
+		couponCode = &code
+	}
+
+	total := (itemsSubtotal - discountAmount) + shippingFee
 
 	var o Order
 	err = tx.QueryRow(ctx, `
@@ -97,26 +130,36 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 			user_id, status, total,
 			recipient_name, phone, address_line1, address_line2, city, postal_code, country,
 			shipping_method, shipping_fee, items_subtotal,
-			payment_status, payment_method
+			payment_status, payment_method,
+			coupon_id, coupon_code, discount_amount
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		RETURNING id, user_id, status, total, created_at, updated_at,
 			recipient_name, phone, address_line1, address_line2, city, postal_code, country,
 			shipping_method, shipping_fee, items_subtotal,
-			payment_status, payment_method
+			payment_status, payment_method,
+			coupon_code, discount_amount
 	`,
 		userID, StatusPending, total,
 		input.RecipientName, input.Phone, input.AddressLine1, nullableString(input.AddressLine2), input.City, input.PostalCode, input.Country,
 		input.ShippingMethod, shippingFee, itemsSubtotal,
 		PaymentStatusPending, PaymentMethodManual,
+		couponID, couponCode, discountAmount,
 	).Scan(
 		&o.ID, &o.UserID, &o.Status, &o.Total, &o.CreatedAt, &o.UpdatedAt,
 		&o.RecipientName, &o.Phone, &o.AddressLine1, &o.AddressLine2, &o.City, &o.PostalCode, &o.Country,
 		&o.ShippingMethod, &o.ShippingFee, &o.ItemsSubtotal,
 		&o.PaymentStatus, &o.PaymentMethod,
+		&o.CouponCode, &o.DiscountAmount,
 	)
 	if err != nil {
 		return Order{}, err
+	}
+
+	if couponID != nil {
+		if err := coupon.InsertRedemption(ctx, tx, *couponID, userID, o.ID); err != nil {
+			return Order{}, err
+		}
 	}
 
 	for _, l := range lines {
@@ -165,7 +208,8 @@ const orderColumns = `
 	id, user_id, status, total, created_at, updated_at,
 	recipient_name, phone, address_line1, address_line2, city, postal_code, country,
 	shipping_method, shipping_fee, items_subtotal,
-	payment_status, payment_method
+	payment_status, payment_method,
+	coupon_code, discount_amount
 `
 
 // scanOrder scans a row (in the same column order as orderColumns) into o.
@@ -175,6 +219,7 @@ func scanOrder(row pgx.Row, o *Order) error {
 		&o.RecipientName, &o.Phone, &o.AddressLine1, &o.AddressLine2, &o.City, &o.PostalCode, &o.Country,
 		&o.ShippingMethod, &o.ShippingFee, &o.ItemsSubtotal,
 		&o.PaymentStatus, &o.PaymentMethod,
+		&o.CouponCode, &o.DiscountAmount,
 	)
 }
 
@@ -252,6 +297,7 @@ const adminOrderColumns = `
 	o.recipient_name, o.phone, o.address_line1, o.address_line2, o.city, o.postal_code, o.country,
 	o.shipping_method, o.shipping_fee, o.items_subtotal,
 	o.payment_status, o.payment_method,
+	o.coupon_code, o.discount_amount,
 	u.id, u.name, u.email
 `
 
@@ -263,6 +309,7 @@ func scanAdminOrder(row pgx.Row, o *AdminOrder) error {
 		&o.RecipientName, &o.Phone, &o.AddressLine1, &o.AddressLine2, &o.City, &o.PostalCode, &o.Country,
 		&o.ShippingMethod, &o.ShippingFee, &o.ItemsSubtotal,
 		&o.PaymentStatus, &o.PaymentMethod,
+		&o.CouponCode, &o.DiscountAmount,
 		&o.Customer.ID, &o.Customer.Name, &o.Customer.Email,
 	)
 }
@@ -403,6 +450,16 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 		if err := restoreOrderStock(ctx, tx, orderID); err != nil {
 			return AdminOrderWithItems{}, err
 		}
+		// Release this order's coupon redemption (if any) in the same
+		// transaction as stock restoration, exactly once. The UPDATE ...
+		// WHERE released_at IS NULL guard, combined with the orders row
+		// lock already held above, means a repeated cancellation attempt
+		// on the same order never double-releases: by the time any second
+		// attempt reaches here, CanTransition has already rejected it
+		// (cancelled is terminal) before this code runs again.
+		if _, err := coupon.ReleaseRedemptionForOrder(ctx, tx, orderID); err != nil {
+			return AdminOrderWithItems{}, err
+		}
 	}
 
 	_, err = tx.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, newStatus, orderID)
@@ -465,6 +522,12 @@ func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) 
 	}
 
 	if err := restoreOrderStock(ctx, tx, orderID); err != nil {
+		return OrderWithItems{}, err
+	}
+	// Release this order's coupon redemption (if any) in the same
+	// transaction as stock restoration, exactly once — see the identical
+	// comment in UpdateStatus above.
+	if _, err := coupon.ReleaseRedemptionForOrder(ctx, tx, orderID); err != nil {
 		return OrderWithItems{}, err
 	}
 

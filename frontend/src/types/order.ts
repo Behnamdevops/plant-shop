@@ -44,6 +44,14 @@ export type OrderSummary = {
 
   payment_status: PaymentStatus
   payment_method: PaymentMethod
+
+  // coupon_code is null for orders that did not use a coupon (including
+  // every order placed before Coupons & Discounts V1). discount_amount is
+  // always an immutable snapshot taken at checkout time — never
+  // recalculated from the coupon's current definition, since a coupon can
+  // be edited or deactivated after an order that used it was placed.
+  coupon_code: string | null
+  discount_amount: number
 }
 
 // OrderItem mirrors the backend's order.Item as returned inside

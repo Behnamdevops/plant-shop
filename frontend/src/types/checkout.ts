@@ -4,6 +4,10 @@ import type { ShippingMethod } from './order'
 // only user-provided checkout information — no prices, fees, totals, or
 // user id. The authenticated user id always comes from the session
 // cookie, and all pricing is calculated server-side.
+// coupon_code is optional. Only the code itself is ever sent — the
+// backend never accepts discount_amount, coupon value, or a final total
+// from the client; everything is recalculated server-side inside the
+// checkout transaction.
 export type CheckoutInput = {
   recipient_name: string
   phone: string
@@ -13,6 +17,7 @@ export type CheckoutInput = {
   postal_code: string
   country: string
   shipping_method: ShippingMethod
+  coupon_code?: string
 }
 
 // SHIPPING_FEES mirrors backend/internal/order/shipping.go's

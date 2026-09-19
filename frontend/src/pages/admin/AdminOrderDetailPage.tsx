@@ -186,17 +186,29 @@ function AdminOrderDetail({ id }: AdminOrderDetailProps) {
           </table>
         </div>
 
+        {order.coupon_code && (
+          <div className="order-card__meta">
+            <span>کد تخفیف: {order.coupon_code}</span>
+          </div>
+        )}
+
         <div className="checkout-summary__totals">
           <div className="checkout-summary__row">
-            <span>جمع جزء کالاها</span>
+            <span>جمع کالاها (قبل از تخفیف)</span>
             <span className="price">{formatToman(order.items_subtotal)}</span>
           </div>
+          {order.discount_amount > 0 && (
+            <div className="checkout-summary__row">
+              <span>تخفیف</span>
+              <span className="price">-{formatToman(order.discount_amount)}</span>
+            </div>
+          )}
           <div className="checkout-summary__row">
             <span>هزینه ارسال</span>
             <span className="price">{formatToman(order.shipping_fee)}</span>
           </div>
           <div className="checkout-summary__row checkout-summary__row--total">
-            <span>جمع کل</span>
+            <span>مبلغ نهایی</span>
             <span className="price">{formatToman(order.total)}</span>
           </div>
         </div>

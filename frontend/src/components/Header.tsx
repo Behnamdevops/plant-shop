@@ -29,6 +29,7 @@ export default function Header() {
               <>
                 <Link to="/admin/products">مدیریت محصولات</Link>
                 <Link to="/admin/orders">مدیریت سفارش‌ها</Link>
+                <Link to="/admin/coupons">کدهای تخفیف</Link>
                 <Link to="/admin/payments/reconciliation">مغایرت‌گیری پرداخت‌ها</Link>
               </>
             )}
