@@ -14,17 +14,25 @@ import AdminProductsPage from './pages/admin/AdminProductsPage'
 import AdminArticlesPage from './pages/admin/AdminArticlesPage'
 import AdminArticleFormPage from './pages/admin/AdminArticleFormPage'
 import AdminArticleCategoriesPage from './pages/admin/AdminArticleCategoriesPage'
-import ArticlesPage from './pages/ArticlesPage'
+import AboutPage from './pages/AboutPage'
 import ArticlePage from './pages/ArticlePage'
+import ArticlesPage from './pages/ArticlesPage'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
+import ContactPage from './pages/ContactPage'
+import FAQPage from './pages/FAQPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import OrdersPage from './pages/OrdersPage'
 import PaymentResultPage from './pages/PaymentResultPage'
+import PrivacyPage from './pages/PrivacyPage'
 import ProductPage from './pages/ProductPage'
 import RegisterPage from './pages/RegisterPage'
+import ReturnsPage from './pages/ReturnsPage'
+import ShopPage from './pages/ShopPage'
+import ShippingPage from './pages/ShippingPage'
+import TermsPage from './pages/TermsPage'
 
 function App() {
   return (
@@ -34,7 +42,17 @@ function App() {
         <div className="page">
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/shop" element={<ShopPage />} />
             <Route path="/products/:slug" element={<ProductPage />} />
+            <Route path="/articles" element={<ArticlesPage />} />
+            <Route path="/articles/:slug" element={<ArticlePage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/contact" element={<ContactPage />} />
+            <Route path="/faq" element={<FAQPage />} />
+            <Route path="/shipping" element={<ShippingPage />} />
+            <Route path="/returns" element={<ReturnsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/cart" element={<CartPage />} />
@@ -42,8 +60,6 @@ function App() {
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
             <Route path="/payment/result" element={<PaymentResultPage />} />
-            <Route path="/articles" element={<ArticlesPage />} />
-            <Route path="/articles/:slug" element={<ArticlePage />} />
             <Route
               path="/admin/products"
               element={
