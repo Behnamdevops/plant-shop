@@ -7,6 +7,7 @@ import AdminCategoriesPage from './pages/admin/AdminCategoriesPage'
 import AdminCouponsPage from './pages/admin/AdminCouponsPage'
 import AdminOrderDetailPage from './pages/admin/AdminOrderDetailPage'
 import AdminOrdersPage from './pages/admin/AdminOrdersPage'
+import AdminReturnsPage from './pages/admin/AdminReturnsPage'
 import AdminPaymentReconciliationPage from './pages/admin/AdminPaymentReconciliationPage'
 import AdminProductCreatePage from './pages/admin/AdminProductCreatePage'
 import AdminProductEditPage from './pages/admin/AdminProductEditPage'
@@ -130,6 +131,14 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminOrderDetailPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/returns"
+              element={
+                <AdminRoute>
+                  <AdminReturnsPage />
                 </AdminRoute>
               }
             />

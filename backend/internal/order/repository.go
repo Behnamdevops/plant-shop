@@ -12,8 +12,8 @@ import (
 )
 
 type Repository struct {
-	db           *pgxpool.Pool
-	coupons      *coupon.Repository
+	db            *pgxpool.Pool
+	coupons       *coupon.Repository
 	notifications *notification.Repository
 }
 
@@ -275,7 +275,8 @@ func (r *Repository) EnqueueOrderCreated(ctx context.Context, orderID int64) err
 
 	payload := notification.OrderCreatedPayload(orderID, "مشتری", email, o.Total, items)
 
-	return r.notifications.EnqueueTx(ctx, nil, notification.EventKey(orderID, "created"), o.UserID, email, notification.EventTypeOrderCreated, payload)
+	_, _ = r.notifications.Enqueue(ctx, notification.EventKey(orderID, "created"), o.UserID, email, notification.EventTypeOrderCreated, payload)
+	return nil
 }
 
 // EnqueueOrderCancelled enqueues an order_cancelled notification for the given order.
@@ -291,7 +292,8 @@ func (r *Repository) EnqueueOrderCancelled(ctx context.Context, orderID int64) e
 
 	payload := notification.OrderCancelledPayload(orderID, "مشتری", email, o.Total)
 
-	return r.notifications.EnqueueTx(ctx, nil, notification.EventKey(orderID, "cancelled"), o.UserID, email, notification.EventTypeOrderCancelled, payload)
+	_, _ = r.notifications.Enqueue(ctx, notification.EventKey(orderID, "cancelled"), o.UserID, email, notification.EventTypeOrderCancelled, payload)
+	return nil
 }
 
 // EnqueueOrderStatus enqueues a notification for an order status transition.
@@ -319,7 +321,8 @@ func (r *Repository) EnqueueOrderStatus(ctx context.Context, orderID int64, stat
 		return nil
 	}
 
-	return r.notifications.EnqueueTx(ctx, nil, notification.EventKeyForOrderStatus(orderID, status), o.UserID, email, eventType, payload)
+	_, _ = r.notifications.Enqueue(ctx, notification.EventKeyForOrderStatus(orderID, status), o.UserID, email, eventType, payload)
+	return nil
 }
 
 // nullableString returns nil for an empty string and a pointer to s
