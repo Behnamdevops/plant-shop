@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom'
 import { storeConfig } from '../config'
 import SEO from '../components/SEO'
 
+const FAQ_PAGE_TITLE = 'سوالات متداول'
+const FAQ_PAGE_DESC = 'سوالات متداول در مورد سفارش، پرداخت، ارسال و نگهداری گیاهان'
+
 type FAQItem = {
   question: string
   answer: string
@@ -119,17 +122,14 @@ const categoryDisplayNames: Record<FAQItem['category'] | 'all', string> = {
 }
 
 export default function FAQPage() {
-  const pageTitle = 'سوالات متداول'
-  const pageDescription = 'سوالات متداول در مورد سفارش، پرداخت، ارسال و نگهداری گیاهان'
-
   const [activeCategory, setActiveCategory] = useState<FAQItem['category'] | 'all'>('all')
   const [openIndices, setOpenIndices] = useState<number[]>([])
 
   useEffect(() => {
-    document.title = `${pageTitle} - ${storeConfig.name}`
+    document.title = `${FAQ_PAGE_TITLE} - ${storeConfig.name}`
     const descMeta = document.querySelector('meta[name="description"]')
     if (descMeta) {
-      descMeta.setAttribute('content', pageDescription)
+      descMeta.setAttribute('content', FAQ_PAGE_DESC)
     }
   }, [])
 
@@ -149,7 +149,11 @@ export default function FAQPage() {
 
   return (
     <div className="faq-page">
-      <SEO title={pageTitle} description={pageDescription} />
+      <SEO
+        title={FAQ_PAGE_TITLE}
+        description={FAQ_PAGE_DESC}
+        canonical="/faq"
+      />
       <div className="faq-header">
         <h1>سوالات متداول</h1>
         <p>

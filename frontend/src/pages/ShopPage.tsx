@@ -10,6 +10,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import ProductImage from '../components/ProductImage'
 import SectionHeader from '../components/SectionHeader'
 import Hero from '../components/Hero'
+import SEO from '../components/SEO'
 
 const VALID_SORTS: ProductSort[] = ['newest', 'price_asc', 'price_desc', 'name_asc']
 const PAGE_SIZE = 20
@@ -42,6 +43,14 @@ export default function ShopPage() {
 
   const [queryInput, setQueryInput] = useState(searchParams.get('q') ?? '')
   const debouncedQuery = useDebouncedValue(queryInput, 400)
+
+  useEffect(() => {
+    document.title = `فروشگاه ${storeConfig.name} - خرید گیاه و گل`
+    const descMeta = document.querySelector('meta[name="description"]')
+    if (descMeta) {
+      descMeta.setAttribute('content', `خرید گیاهات و گل‌های سالم از ${storeConfig.name} - آموزش نگهداری گیاهان`)
+    }
+  }, [])
 
   const [minPriceInput, setMinPriceInput] = useState(searchParams.get('min_price') ?? '')
   const [maxPriceInput, setMaxPriceInput] = useState(searchParams.get('max_price') ?? '')
@@ -168,6 +177,11 @@ export default function ShopPage() {
 
   return (
     <div className="shop-page">
+      <SEO
+        title="فروشگاه"
+        description={`خرید گیاهات و گل‌های سالم از ${storeConfig.name}`}
+        canonical="/shop"
+      />
       <Hero
         title={`فروشگاه ${storeConfig.name}`}
         subtitle="گیاهان سالم و تازه، تا در خانه شما"

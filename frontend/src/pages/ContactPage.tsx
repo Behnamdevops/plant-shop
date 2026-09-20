@@ -18,6 +18,8 @@ const contactConfig: ContactConfig = {
   supportInstagram: import.meta.env.VITE_SUPPORT_INSTAGRAM || undefined,
 }
 
+const hasContactInfo = contactConfig.supportEmail || contactConfig.supportPhone
+
 export default function ContactPage() {
   const pageTitle = 'تماس با ما'
   const pageDescription = 'ارتباط با ' + storeConfig.name + ' برای سوالات و پشتیبانی'
@@ -30,11 +32,13 @@ export default function ContactPage() {
     }
   }, [])
 
-  const hasContactInfo = contactConfig.supportEmail || contactConfig.supportPhone
-
   return (
     <div className="contact-page">
-      <SEO title={pageTitle} description={pageDescription} />
+      <SEO
+        title={pageTitle}
+        description={pageDescription}
+        canonical="/contact"
+      />
       <SectionHeader
         title="تماس با ما"
         subtitle="سوالی دارید؟ ما اینجا هستیم تا کمک کنیم"

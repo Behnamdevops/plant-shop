@@ -21,7 +21,11 @@ export default function AboutPage() {
 
   return (
     <div className="about-page">
-      <SEO title={pageTitle} description={pageDescription} />
+      <SEO
+        title={pageTitle}
+        description={pageDescription}
+        canonical="/about"
+      />
       <Hero
         title="درباره ما"
         subtitle="فروشگاه آنلاین گیاهات با هدف آموزش و ارائه بهترین محصولات"

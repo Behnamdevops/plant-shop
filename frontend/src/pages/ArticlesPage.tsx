@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { getArticleCategories, getArticles, type Article, type ArticleCategory } from '../api/articles'
+import SEO from '../components/SEO'
+import { storeConfig } from '../config'
 
 export default function ArticlesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -62,6 +64,14 @@ export default function ArticlesPage() {
     setSearchParams(params)
   }
 
+  useEffect(() => {
+    document.title = 'مقالات و آموزش‌ها - ' + storeConfig.name
+    const descMeta = document.querySelector('meta[name="description"]')
+    if (descMeta) {
+      descMeta.setAttribute('content', 'مقالات و آموزش‌های جامع در مورد نگهداری گیاهان')
+    }
+  }, [])
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return ''
     return new Date(dateStr).toLocaleDateString('fa-IR', {
@@ -77,7 +87,13 @@ export default function ArticlesPage() {
 
   return (
     <div className="articles-page">
+      <SEO
+        title="مقالات و آموزش‌ها"
+        description="مقالات و آموزش‌های جامع در مورد نگهداری گیاهان"
+        canonical="/articles"
+      />
       <div className="articles-header">
+        <h1>مقالات و آموزش‌ها</h1>
         <h1>مقالات و آموزش‌ها</h1>
         
         <form onSubmit={handleSearch} className="search-form">

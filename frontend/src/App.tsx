@@ -39,12 +39,14 @@ import ReturnsPage from './pages/ReturnsPage'
 import ShopPage from './pages/ShopPage'
 import ShippingPage from './pages/ShippingPage'
 import TermsPage from './pages/TermsPage'
+import PrivatePageProtection from './components/PrivatePageProtection'
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Header />
+        <PrivatePageProtection />
         <div className="page">
           <Routes>
             <Route path="/" element={<HomePage />} />
