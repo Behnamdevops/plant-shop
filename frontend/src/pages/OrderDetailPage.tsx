@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { cancelOrder, getOrder } from '../api/orders'
+import { cancelOrder, getOrder, createReturnRequest, getReturnRequest } from '../api/orders'
+import type { ReturnRequest } from '../api/orders'
 import { requestZarinPalPayment } from '../api/payments'
 import { ApiError } from '../api/errors'
 import type { OrderDetails } from '../types/order'
@@ -25,6 +26,13 @@ function OrderDetail({ id }: OrderDetailProps) {
   const [payError, setPayError] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  const [returnRequest, setReturnRequest] = useState<ReturnRequest | null>(null)
+  const [loadingReturnRequest, setLoadingReturnRequest] = useState(false)
+  const [returnRequestError, setReturnRequestError] = useState('')
+  const [showReturnForm, setShowReturnForm] = useState(false)
+  const [returnReason, setReturnReason] = useState('')
+  const [returnNote, setReturnNote] = useState('')
+  const [submittingReturnRequest, setSubmittingReturnRequest] = useState(false)
 
   useEffect(() => {
     if (authLoading || !user) {
@@ -37,6 +45,24 @@ function OrderDetail({ id }: OrderDetailProps) {
       .then((data) => {
         if (!ignore) {
           setOrder(data)
+          // Load return request if order is delivered and paid
+          if (data.status === 'delivered' && data.payment_status === 'paid') {
+            setLoadingReturnRequest(true)
+            getReturnRequest(id)
+              .then((req) => {
+                if (!ignore) setReturnRequest(req)
+              })
+              .catch((err) => {
+                // 404 means no return request exists - that's okay
+                if (ignore) return
+                if (err instanceof ApiError && err.status !== 404) {
+                  setReturnRequestError('مشکلی در بارگذاری درخواست مرجوعی پیش آمد')
+                }
+              })
+              .finally(() => {
+                if (!ignore) setLoadingReturnRequest(false)
+              })
+          }
         }
       })
       .catch((err) => {
@@ -84,6 +110,38 @@ function OrderDetail({ id }: OrderDetailProps) {
       }
     } finally {
       setCancelling(false)
+    }
+  }
+
+  const handleCreateReturnRequest = async () => {
+    setReturnRequestError('')
+    setSubmittingReturnRequest(true)
+    try {
+      const req = await createReturnRequest(id, {
+        reason: returnReason.trim(),
+        customer_note: returnNote.trim() || undefined,
+      })
+      setReturnRequest(req)
+      setShowReturnForm(false)
+      setReturnReason('')
+      setReturnNote('')
+    } catch (err) {
+      if (err instanceof ApiError) {
+        switch (err.status) {
+          case 409:
+            setReturnRequestError('این سفارش قبلاً درخواست مرجوعی دارد.')
+            break
+          case 400:
+            setReturnRequestError('لطفاً دلیل مرجوعی را وارد کنید.')
+            break
+          default:
+            setReturnRequestError('درخواست مرجوعی با مشکل مواجه شد.')
+        }
+      } else {
+        setReturnRequestError('خطای غیرمنتظره رخ داد.')
+      }
+    } finally {
+      setSubmittingReturnRequest(false)
     }
   }
 
@@ -142,8 +200,9 @@ function OrderDetail({ id }: OrderDetailProps) {
     )
   }
 
-  const canPay = order.payment_status !== 'paid' && order.status !== 'cancelled' && order.status !== 'delivered'
-  const canCancel = order.payment_status !== 'paid' && (order.status === 'pending' || order.status === 'processing')
+  const canPay = order!.payment_status !== 'paid' && order!.status !== 'cancelled' && order!.status !== 'delivered'
+  const canCancel = order!.payment_status !== 'paid' && (order!.status === 'pending' || order!.status === 'processing')
+  const canReturn = order!.status === 'delivered' && order!.payment_status === 'paid' && !returnRequest
 
   return (
     <main>
@@ -254,6 +313,103 @@ function OrderDetail({ id }: OrderDetailProps) {
             <span className="price">{formatToman(order.total)}</span>
           </div>
         </div>
+
+        {loadingReturnRequest ? (
+          <div className="order-card__return">
+            <h2>درخواست مرجوعی</h2>
+            <p className="state-message">در حال بارگذاری...</p>
+          </div>
+        ) : returnRequest ? (
+          <div className="order-card__return">
+            <h2>درخواست مرجوعی</h2>
+            <div className="return-request-status">
+              <span className="status-badge">{returnRequest.status}</span>
+              <p>دلیل: {returnRequest.reason}</p>
+              {returnRequest.customer_note && <p>توضیحات: {returnRequest.customer_note}</p>}
+              {returnRequest.admin_note && <p>یادداشت مدیر: {returnRequest.admin_note}</p>}
+              {returnRequest.status === 'requested' && (
+                <p className="state-message">درخواست شما در حال بررسی است.</p>
+              )}
+              {returnRequest.status === 'approved' && (
+                <p>درخواست شما تایید شد. لطفاً محصول را آماده کنید.</p>
+              )}
+              {returnRequest.status === 'received' && (
+                <p>محصول دریافت شد. بازپرداخت در حال پردازش است.</p>
+              )}
+              {returnRequest.status === 'refund_pending' && (
+                <p>بازپرداخت در حال پردازش است.</p>
+              )}
+              {returnRequest.status === 'refunded' && (
+                <p className="success">مبلغ بازپرداخت شد.</p>
+              )}
+              {returnRequest.status === 'rejected' && (
+                <p>درخواست مرجوعی شما رد شد.</p>
+              )}
+              {returnRequest.status === 'refund_failed' && (
+                <p>بازپرداخت انجام نشد. لطفاً با پشتیبانی تماس بگیرید.</p>
+              )}
+            </div>
+          </div>
+        ) : canReturn && (
+          <div className="order-card__return">
+            <h2>درخواست مرجوعی</h2>
+            {returnRequestError && (
+              <p className="alert alert-error" role="alert">
+                {returnRequestError}
+              </p>
+            )}
+            {showReturnForm ? (
+              <div className="return-request-form">
+                <label htmlFor="return-reason">دلیل مرجوعی *</label>
+                <textarea
+                  id="return-reason"
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder="توضیحات دقیقی از مشکل محصول ارائه دهید"
+                  required
+                  maxLength={1024}
+                />
+                <label htmlFor="return-note">توضیحات دیگر (اختیاری)</label>
+                <textarea
+                  id="return-note"
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  placeholder="هر اطلاعات اضافی که مایل باشید اضافه کنید"
+                  maxLength={2048}
+                />
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setShowReturnForm(false)
+                      setReturnReason('')
+                      setReturnNote('')
+                    }}
+                  >
+                    لغو
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleCreateReturnRequest}
+                    disabled={submittingReturnRequest || !returnReason.trim()}
+                  >
+                    {submittingReturnRequest ? 'در حال ارسال...' : 'ارسال درخواست'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowReturnForm(true)}
+              >
+                درخواست مرجوعی / بازپرداخت
+              </button>
+            )}
+          </div>
+        )}
 
         {(order.recipient_name || order.address_line1) && (
           <div className="order-card__delivery">

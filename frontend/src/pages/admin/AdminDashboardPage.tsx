@@ -115,6 +115,11 @@ export default function AdminDashboardPage() {
               <h3 style={{ marginBottom: '8px', fontSize: '1.1rem' }}>دسته‌بندی‌ها</h3>
               <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>ساختار دسته‌بندی محصولات</p>
             </Link>
+
+            <Link to="/admin/returns" style={{ display: 'block', padding: '20px', background: 'var(--surface)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}>
+              <h3 style={{ marginBottom: '8px', fontSize: '1.1rem' }}>مرجوعی‌ها</h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>مشاهده و مدیریت درخواست‌های مرجوعی</p>
+            </Link>
           </div>
 
           {/* Low Stock Alert */}

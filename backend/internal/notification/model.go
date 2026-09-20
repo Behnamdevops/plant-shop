@@ -25,6 +25,16 @@ const (
 	EventTypeOrderCancelled   = "order_cancelled"
 )
 
+// Return/refund event types
+const (
+	EventTypeReturnRequested = "return_requested"
+	EventTypeReturnApproved  = "return_approved"
+	EventTypeReturnRejected  = "return_rejected"
+	EventTypeReturnReceived  = "return_received"
+	EventTypeRefundSucceeded = "refund_succeeded"
+	EventTypeRefundFailed    = "refund_failed"
+)
+
 // NotificationOutbox represents a row in the notification_outbox table.
 type NotificationOutbox struct {
 	ID             int64      `json:"id"`
@@ -79,6 +89,16 @@ func EventKeyForPayment(orderID int64, eventType string) string {
 // EventKeyForOrderStatus generates an event key for an order status transition.
 func EventKeyForOrderStatus(orderID int64, status string) string {
 	return fmt.Sprintf("order:%d:status:%s", orderID, status)
+}
+
+// EventKeyForReturnRequest generates an event key for a return request event.
+func EventKeyForReturnRequest(returnRequestID int64, status string) string {
+	return fmt.Sprintf("return_request:%d:%s", returnRequestID, status)
+}
+
+// EventKeyForRefund generates an event key for a refund event.
+func EventKeyForRefund(refundID int64, status string) string {
+	return fmt.Sprintf("refund:%d:%s", refundID, status)
 }
 
 // OrderCreatedPayload creates the payload for an order_created event.
@@ -137,6 +157,32 @@ func OrderCancelledPayload(orderID int64, customerName, customerEmail string, to
 		"total":          total,
 		"total_toman":    formatToman(total),
 		"message":        "سفارش شما لغو شد.",
+	}
+}
+
+// ReturnRequestPayload creates the payload for a return request event.
+func ReturnRequestPayload(orderID int64, customerName, customerEmail, status, message string, total int64) Payload {
+	return Payload{
+		"order_id":       orderID,
+		"customer_name":  customerName,
+		"customer_email": customerEmail,
+		"total":          total,
+		"total_toman":    formatToman(total),
+		"status":         status,
+		"message":        message,
+	}
+}
+
+// RefundPayload creates the payload for a refund event.
+func RefundPayload(orderID int64, customerName, customerEmail, status, message string, total int64) Payload {
+	return Payload{
+		"order_id":       orderID,
+		"customer_name":  customerName,
+		"customer_email": customerEmail,
+		"total":          total,
+		"total_toman":    formatToman(total),
+		"status":         status,
+		"message":        message,
 	}
 }
 

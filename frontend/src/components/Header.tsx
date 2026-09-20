@@ -78,6 +78,9 @@ export default function Header({ isPublic = false }: HeaderProps) {
                 <Link to="/admin/orders" className="site-header__nav-link">
                   مدیریت سفارش‌ها
                 </Link>
+                <Link to="/admin/returns" className="site-header__nav-link">
+                  مدیریت مرجوعی‌ها
+                </Link>
               </>
             )}
             <span className="site-header__user">سلام، {user.name}</span>

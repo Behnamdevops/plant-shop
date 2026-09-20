@@ -738,6 +738,53 @@ tbody tr:hover {
   color: var(--text-muted);
 }
 
+/* ---------- Return Request ---------- */
+
+.order-card__return {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+.order-card__return h2 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+}
+
+.return-request-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.return-request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.return-request-form textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  background: var(--surface);
+  color: var(--text-h);
+  min-height: 80px;
+  resize: vertical;
+}
+
+.return-request-form textarea:focus-visible {
+  border-color: var(--primary);
+}
+
+.return-request-form label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
 /* ---------- Status badges ---------- */
 
 .status-badge {

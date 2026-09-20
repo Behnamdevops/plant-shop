@@ -26,6 +26,8 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/order"
 	"github.com/Behnamdevops/plant-shop/backend/internal/payment"
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
+	"github.com/Behnamdevops/plant-shop/backend/internal/refund"
+	returnpkg "github.com/Behnamdevops/plant-shop/backend/internal/return"
 	"github.com/Behnamdevops/plant-shop/backend/internal/storage"
 	"github.com/Behnamdevops/plant-shop/backend/internal/upload"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -129,6 +131,21 @@ func run() error {
 	paymentRepository.WithNotifications(notificationRepository)
 	paymentHandler := payment.NewHandler(paymentRepository, authHandler, zarinpalClient, paymentConfig.CallbackURL, paymentConfig.FrontendBaseURL)
 
+	// Refund / Returns V1
+	returnRepository := returnpkg.NewRepository(db, orderRepository)
+	returnRepository.WithNotifications(notificationRepository)
+	returnHandler := returnpkg.NewHandler(returnRepository, orderRepository, authHandler)
+
+	refundRepository := refund.NewRepository(db, orderRepository)
+	refundRepository.WithNotifications(notificationRepository)
+	// ZarinPal does not offer a verified refund API, so this provider
+	// always reports manual_review rather than a false success. AdminRefund
+	// rejects manual-payment orders outright; those are only ever completed
+	// via AdminManualRefund's explicit admin confirmation, which never
+	// calls this provider.
+	refundProvider := refund.NewZarinPalRefundProvider(paymentConfig.MerchantID)
+	refundHandler := refund.NewHandler(refundRepository, refundProvider, authHandler, returnRepository)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", operational.Health)
@@ -176,6 +193,12 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/orders/{id}", orderHandler.GetByID)
 	mux.HandleFunc("POST /api/v1/orders/{id}/cancel", orderHandler.Cancel)
 
+	// Customer return requests. Authentication and per-user ownership are
+	// enforced inside the handler; cross-user access returns 404, matching
+	// the order package's existing safe-404 convention.
+	mux.HandleFunc("POST /api/v1/orders/{id}/return-request", returnHandler.Create)
+	mux.HandleFunc("GET /api/v1/orders/{id}/return-request", returnHandler.GetByID)
+
 	// Account V2 endpoints
 	mux.HandleFunc("GET /api/v1/account/profile", accountHandler.GetProfile)
 	mux.HandleFunc("PUT /api/v1/account/profile", accountHandler.UpdateProfile)
@@ -187,6 +210,16 @@ func run() error {
 	mux.HandleFunc("GET /api/v1/admin/orders", orderHandler.AdminList)
 	mux.HandleFunc("GET /api/v1/admin/orders/{id}", orderHandler.AdminGetByID)
 	mux.HandleFunc("PUT /api/v1/admin/orders/{id}/status", orderHandler.AdminUpdateStatus)
+
+	// Admin return/refund review. All admin-only; explicit action endpoints
+	// only — no generic status-mutation endpoint is exposed here.
+	mux.HandleFunc("GET /api/v1/admin/returns", returnHandler.AdminList)
+	mux.HandleFunc("GET /api/v1/admin/returns/{id}", returnHandler.AdminGetByID)
+	mux.HandleFunc("POST /api/v1/admin/returns/{id}/approve", returnHandler.AdminApprove)
+	mux.HandleFunc("POST /api/v1/admin/returns/{id}/reject", returnHandler.AdminReject)
+	mux.HandleFunc("POST /api/v1/admin/returns/{id}/received", returnHandler.AdminReceived)
+	mux.HandleFunc("POST /api/v1/admin/returns/{id}/refund", refundHandler.AdminRefund)
+	mux.HandleFunc("POST /api/v1/admin/returns/{id}/refund-manual", refundHandler.AdminManualRefund)
 
 	mux.Handle("POST /api/v1/coupons/preview", limited(couponHandler.Preview))
 	mux.HandleFunc("GET /api/v1/admin/coupons", couponHandler.AdminList)
