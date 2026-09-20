@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { getArticleBySlug, type Article } from '../api/articles'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import SEO from '../components/SEO'
 
 // Configure marked to be safe - no HTML rendering
 marked.setOptions({
@@ -23,11 +24,11 @@ export default function ArticlePage() {
       .then((data) => {
         setArticle(data)
         setError(null)
-        
+
         // Update SEO metadata
         const seoTitle = data.seo_title || data.title
         const seoDesc = data.seo_description || data.excerpt
-        
+
         document.title = seoTitle
         const descMeta = document.querySelector('meta[name="description"]')
         if (descMeta) {
@@ -82,13 +83,33 @@ export default function ArticlePage() {
     )
   }
 
+  const structuredData = article ? {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: article.title,
+    description: article.excerpt,
+    datePublished: article.published_at,
+    image: article.cover_image_url
+  } : null
+
   return (
-    <div className="article-page">
+    <>
+      <SEO
+        title={article?.seo_title || article?.title || 'مقاله'}
+        description={article?.seo_description || article?.excerpt}
+        canonical={article ? `/articles/${article.slug}` : '/articles'}
+      />
+      {structuredData && (
+        <script type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </script>
+      )}
+      <div className="article-page">
       <article className="article">
         {article.cover_image_url && (
           <div className="article-hero">
-            <img 
-              src={article.cover_image_url} 
+            <img
+              src={article.cover_image_url}
               alt={article.title}
               onError={(e) => {
                 (e.target as HTMLImageElement).src = '/placeholder-image.jpg'
@@ -99,8 +120,8 @@ export default function ArticlePage() {
 
         <header className="article-header">
           {article.category && (
-            <Link 
-              to={`/articles?category=${article.category.id}`} 
+            <Link
+              to={`/articles?category=${article.category.id}`}
               className="article-category"
             >
               {article.category.name}
@@ -114,7 +135,7 @@ export default function ArticlePage() {
           </div>
         </header>
 
-        <div 
+        <div
           className="article-body markdown-content"
           dangerouslySetInnerHTML={renderMarkdown(article.content)}
         />
@@ -125,6 +146,7 @@ export default function ArticlePage() {
           ← بازگشت به مقالات
         </Link>
       </div>
-    </div>
+      </div>
+    </>
   )
 }

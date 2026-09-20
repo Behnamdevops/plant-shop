@@ -1,0 +1,23 @@
+# robots.txt for Plant Shop
+# https://giiaco.ir
+
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://giiaco.ir/sitemap.xml
+
+# Disallow admin pages
+Disallow: /admin
+Disallow: /account
+Disallow: /cart
+Disallow: /checkout
+Disallow: /orders
+Disallow: /payment/result
+
+# Disallow login/register pages
+Disallow: /login
+Disallow: /register
+
+# Crawl delay (optional)
+Crawl-delay: 1

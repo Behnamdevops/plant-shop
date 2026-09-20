@@ -6,6 +6,8 @@ import type { Product } from '../types/product'
 import { useAuth } from '../hooks/useAuth'
 import { formatToman } from '../lib/format'
 import ProductImage from '../components/ProductImage'
+import SEO from '../components/SEO'
+import { storeConfig } from '../config'
 
 type ProductDetailsProps = {
   slug: string
@@ -19,6 +21,23 @@ function ProductDetails({ slug }: ProductDetailsProps) {
   const [cartMessage, setCartMessage] = useState('')
   const [cartError, setCartError] = useState('')
   const [addingToCart, setAddingToCart] = useState(false)
+
+  const handleAddToCart = async () => {
+    if (!product) return
+
+    setCartError('')
+    setCartMessage('')
+    setAddingToCart(true)
+
+    try {
+      await addCartItem(product.id, 1)
+      setCartMessage('به سبد خرید اضافه شد')
+    } catch (err) {
+      setCartError(err instanceof Error ? err.message : 'مشکلی در افزودن به سبد خرید پیش آمد')
+    } finally {
+      setAddingToCart(false)
+    }
+  }
 
   useEffect(() => {
     let ignore = false
@@ -66,87 +85,101 @@ function ProductDetails({ slug }: ProductDetailsProps) {
     )
   }
 
-  const handleAddToCart = async () => {
-    setCartError('')
-    setCartMessage('')
-    setAddingToCart(true)
-
-    try {
-      await addCartItem(product.id, 1)
-      setCartMessage('به سبد خرید اضافه شد')
-    } catch (err) {
-      setCartError(err instanceof Error ? err.message : 'مشکلی در افزودن به سبد خرید پیش آمد')
-    } finally {
-      setAddingToCart(false)
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description,
+    image: product.image_url || undefined,
+    offers: {
+      '@type': 'Offer',
+      url: window.location.href,
+      price: product.price,
+      priceCurrency: 'IRR',
+      availability: product.stock <= 0
+        ? 'https://schema.org/OutOfStock'
+        : product.stock <= 5
+          ? 'https://schema.org/LimitedAvailability'
+          : 'https://schema.org/InStock'
     }
   }
 
   return (
-    <main>
-      <Link to="/" className="back-link">
-        → بازگشت
-      </Link>
+    <>
+      <SEO
+        title={product.name}
+        description={product.description || `خرید ${product.name} از ${storeConfig.name}`}
+        canonical={`/products/${product.slug}`}
+      />
+      <script type="application/ld+json">
+        {JSON.stringify(structuredData)}
+      </script>
+      <main>
+        <Link to="/" className="back-link">
+          → بازگشت
+        </Link>
 
-      <div className="product-detail">
-        <div className="product-detail__media">
-          <ProductImage
-            src={product.image_url}
-            alt={product.name}
-            placeholderClassName="product-detail__media-placeholder"
-          />
-        </div>
-
-        <div className="product-detail__info">
-          <h1>{product.name}</h1>
-
-          <div className="product-detail__price-row">
-            <span className="price">{formatToman(product.price)}</span>
-            {product.stock <= 0 ? (
-              <span className="badge badge-out-of-stock">ناموجود</span>
-            ) : product.stock <= 5 ? (
-              <span className="badge badge-limited-stock">تعداد محدود ({product.stock} عدد)</span>
-            ) : (
-              <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
-            )}
+        <div className="product-detail">
+          <div className="product-detail__media">
+            <ProductImage
+              src={product.image_url}
+              alt={product.name}
+              placeholderClassName="product-detail__media-placeholder"
+            />
           </div>
 
-          <p className="product-detail__description">{product.description}</p>
+          <div className="product-detail__info">
+            <h1>{product.name}</h1>
 
-          {!authLoading && (
-            user ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleAddToCart}
-                  disabled={product.stock <= 0 || addingToCart}
-                >
-                  {product.stock <= 0
-                    ? 'ناموجود'
-                    : addingToCart
-                      ? 'در حال افزودن...'
-                      : 'افزودن به سبد خرید'}
-                </button>
-                {cartMessage && (
-                  <p className="alert alert-success" role="status">
-                    {cartMessage}
-                  </p>
-                )}
-                {cartError && (
-                  <p className="alert alert-error" role="alert">
-                    {cartError}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p>
-                برای افزودن این محصول به سبد خرید، <Link to="/login">وارد شوید</Link>.
-              </p>
-            )
-          )}
+            <div className="product-detail__price-row">
+              <span className="price">{formatToman(product.price)}</span>
+              {product.stock <= 0 ? (
+                <span className="badge badge-out-of-stock">ناموجود</span>
+              ) : product.stock <= 5 ? (
+                <span className="badge badge-limited-stock">تعداد محدود ({product.stock} عدد)</span>
+              ) : (
+                <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
+              )}
+            </div>
+
+            <p className="product-detail__description">{product.description}</p>
+
+            {!authLoading && (
+              user ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleAddToCart}
+                    disabled={product.stock <= 0 || addingToCart}
+                  >
+                    {product.stock <= 0
+                      ? 'ناموجود'
+                      : addingToCart
+                        ? 'در حال افزودن...'
+                        : 'افزودن به سبد خرید'}
+                  </button>
+                  {cartMessage && (
+                    <p className="alert alert-success" role="status">
+                      {cartMessage}
+                    </p>
+                  )}
+                  {cartError && (
+                    <p className="alert alert-error" role="alert">
+                      {cartError}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>
+                  برای افزودن این محصول به سبد خرید، <Link to="/login">وارد شوید</Link>.
+                </p>
+              )
+            )}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </>
   )
 }
 

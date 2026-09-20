@@ -12,6 +12,7 @@ import Hero from '../components/Hero'
 import SectionHeader from '../components/SectionHeader'
 import ArticleCard from '../components/ArticleCard'
 import StoreBenefitCard from '../components/StoreBenefitCard'
+import SEO from '../components/SEO'
 
 export default function HomePage() {
   const [categories, setCategories] = useState<Category[]>([])
@@ -32,6 +33,22 @@ export default function HomePage() {
       )
     }
   }, [])
+
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: storeConfig.name,
+    description: 'فروشگاه آنلاین گیاهات با هدف آموزش و ارائه بهترین محصولات',
+    url: window.location.href,
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: {
+        '@type': 'EntryPoint',
+        urlTemplate: window.location.origin + '/shop?q={search_term_string}'
+      },
+      'query-input': 'required name=search_term_string'
+    }
+  }
 
   useEffect(() => {
     getCategories()
@@ -335,6 +352,14 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+      <SEO
+        title={storeConfig.name}
+        description={'فروشگاه آنلاین ' + storeConfig.name + ' - محصولات با کیفیت، آموزش‌های جامع و مشاوره گیاهان'}
+        canonical="/"
+      />
+      <script type="application/ld+json">
+        {JSON.stringify(structuredData)}
+      </script>
     </div>
   )
 }
