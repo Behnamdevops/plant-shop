@@ -1,99 +1,41 @@
-import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { storeConfig } from '../config'
-import SEO from '../components/SEO'
-
+import { Link } from "react-router-dom";
+import SEO from "../components/SEO";
 export default function ReturnsPage() {
-  const pageTitle = 'سیاست بازگرداندن'
-  const pageDescription = 'سیاست بازگرداندن و بازپرداخت محصولات در ' + storeConfig.name
-
-  useEffect(() => {
-    document.title = `${pageTitle} - ${storeConfig.name}`
-    const descMeta = document.querySelector('meta[name="description"]')
-    if (descMeta) {
-      descMeta.setAttribute('content', pageDescription)
-    }
-  }, [])
-
   return (
-    <div className="returns-page">
-      <SEO title={pageTitle} description={pageDescription} />
-      <div className="page-header">
-        <h1>سیاست بازگرداندن</h1>
-        <p className="page-subtitle">
-          ما به رضایت مشتریان خود اهمیت ویژه‌ای می‌دهیم
+    <main className="returns-page">
+      <SEO
+        title="مرجوعی و رسیدگی به آسیب"
+        description="روش ثبت درخواست مرجوعی و بررسی آسیب محصول"
+        canonical="/returns"
+      />
+      <h1>مرجوعی و رسیدگی به آسیب</h1>
+      <section className="content-section">
+        <h2>ثبت درخواست</h2>
+        <p>
+          برای سفارش پرداخت‌شده و تحویل‌گرفته، از صفحه جزئیات سفارش در حساب خود
+          درخواست مرجوعی ثبت کنید. دلیل و توضیحات آسیب را بنویسید و عکس محصول و
+          بسته‌بندی را برای بررسی پشتیبانی نگه دارید.
         </p>
-      </div>
-
-      <div className="returns-content">
-        <div className="content-section">
-          <h2>لغو سفارش قبل از ارسال</h2>
-          <p>
-            در صورتی که سفارش شما هنوز به مرحله ارسال نرسیده، امکان لغو آن وجود دارد. لغو سفارش
-            می‌تواند از طریق:
-          </p>
-          <ul>
-            <li>صفحه سبد خرید قبل از پرداخت</li>
-            <li>حساب کاربری و بخش «سفارش‌های من»</li>
-            <li>تماس با پشتیبانی</li>
-          </ul>
-          <p>
-            پس از لغو موفق، مبلغ سفارش به حساب شما برمی‌گردد. زمان بازگشت مبلغ بستگی به روش
-            پرداخت و بانک شما دارد.
-          </p>
-        </div>
-
-        <div className="content-section">
-          <h2>بازگرداندن محصول پس از ارسال</h2>
-          <p>
-            در حال حاضر، سیستم بازگرداندن خودکار محصولات پس از ارسال در دسترس نیست. اما در صورتی
-            که:
-          </p>
-          <ul>
-            <li>محصول با آسیب به دست شما رسید</li>
-            <li>محصول با توضیحات آن تفاوت دارد</li>
-            <li>مشکل دیگری در محصول مشاهده می‌کنید</li>
-          </ul>
-          <p>
-            لطفاً از طریق <Link to="/contact">تماس با ما</Link> با پشتیبانی تماس بگیرید. ما تلاش
-            می‌کنیم بهترین راه حل را پیدا کنیم.
-          </p>
-        </div>
-
-        <div className="content-section">
-          <h2>ملاحظات مهم</h2>
-          <div className="returns-notice">
-            <p>
-              به دلیل طبيعت محصولات ما (گیاهان زنده)، بازگرداندن محصول پس از دریافت دارای محدودیت
-              است. لطفاً قبل از خرید:
-            </p>
-            <ul>
-              <li>توضیحات محصول را به دقت مطالعه کنید</li>
-              <li>از شرایط نگهداری آگاه شوید</li>
-              <li>در صورت نیاز، از آموزش‌های ما استفاده کنید</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="content-section">
-          <h2>ارتباط با پشتیبانی</h2>
-          <p>
-            برای درخواست بازگرداندن یا لغو سفارش، موارد زیر را آماده کنید:
-          </p>
-          <ul>
-            <li>شماره سفارش</li>
-            <li>توضیحات دقیق مشکل یا دلیل لغو</li>
-            <li>عکس‌های لازم در صورت وجود آسیب</li>
-          </ul>
-        </div>
-
-        <div className="returns-contact">
-          <h3>نیاز به کمک دارید؟</h3>
-          <Link to="/contact" className="btn btn-primary">
-            تماس با پشتیبانی
-          </Link>
-        </div>
-      </div>
-    </div>
-  )
+        <p>
+          درخواست توسط مدیر بررسی می‌شود. ثبت درخواست به معنی تأیید مرجوعی یا
+          بازپرداخت نیست؛ نتیجه و مراحل بعدی در همان صفحه قابل پیگیری است.
+        </p>
+        <Link className="btn btn-primary" to="/orders">
+          سفارش‌های من
+        </Link>
+      </section>
+      <section className="content-section">
+        <h2>لغو سفارش</h2>
+        <p>
+          لغو مستقیم فقط برای سفارش در انتظار پرداخت و بدون پرداخت فعال
+          امکان‌پذیر است. برای سفارش پرداخت‌شده با پشتیبانی تماس بگیرید.
+        </p>
+        <Link to="/contact">تماس با پشتیبانی</Link>
+      </section>
+      <p>
+        شرایط زمانی و هزینه‌های مرجوعی باید پیش از شروع فروش توسط فروشگاه اعلام
+        شوند.
+      </p>
+    </main>
+  );
 }

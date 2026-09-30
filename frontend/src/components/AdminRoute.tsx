@@ -1,3 +1,4 @@
+import AdminNav from './AdminNav'
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -19,7 +20,12 @@ export default function AdminRoute({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />
+    return (
+      <Navigate
+        to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`}
+        replace
+      />
+    )
   }
 
   if (user.role !== 'admin') {
@@ -33,5 +39,10 @@ export default function AdminRoute({ children }: { children: ReactNode }) {
     )
   }
 
-  return <>{children}</>
+  return (
+    <div className="admin-layout">
+      <AdminNav />
+      <div className="admin-content">{children}</div>
+    </div>
+  )
 }

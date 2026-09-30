@@ -1,3 +1,5 @@
+import { mergeGuestCart } from '../lib/guestCart'
+import { mergeGuestWishlist } from '../lib/wishlist'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -16,18 +18,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     getCurrentUser()
-      .then(setUser)
+      .then(async (current) => {
+        if (current) {
+          await Promise.allSettled([mergeGuestCart(), mergeGuestWishlist()])
+        }
+        setUser(current)
+      })
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
   }, [])
 
   const login = useCallback(async (input: AuthCredentials) => {
     const loggedInUser = await apiLogin(input)
+    await Promise.allSettled([mergeGuestCart(), mergeGuestWishlist()])
     setUser(loggedInUser)
   }, [])
 
   const register = useCallback(async (input: RegisterInput) => {
     const registeredUser = await apiRegister(input)
+    await Promise.allSettled([mergeGuestCart(), mergeGuestWishlist()])
     setUser(registeredUser)
   }, [])
 

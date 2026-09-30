@@ -564,3 +564,18 @@ func TestRepositorySameReferenceAcrossOrdersQuarantines(t *testing.T) {
 		})
 	}
 }
+
+func TestLateExpiredAuthorityIsQuarantined(t *testing.T) {
+	env := newTestEnv(t, succeedingClient())
+	cookie, _ := env.registerAndLogin(t)
+	o := env.createOrder(t, cookie)
+	a := env.insertLegacyAttempt(t, o, "expired")
+	_, err := order.NewRepository(env.db).CancelOwnOrder(t.Context(), o.UserID, o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.callback(t, *a.Authority, "OK", "unknown")
+	code := 100
+	env.assertAttempt(t, *a.Authority, StatusReconciliation, 123456, &code)
+	env.assertOrderStock(t, o.ID, order.StatusCancelled, order.PaymentStatusPending, 10)
+}

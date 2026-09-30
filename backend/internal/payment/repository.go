@@ -10,9 +10,9 @@ import (
 )
 
 type Repository struct {
-	db           *pgxpool.Pool
-	environment  string
-	identity     string
+	db            *pgxpool.Pool
+	environment   string
+	identity      string
 	notifications *notification.Repository
 }
 
@@ -133,7 +133,7 @@ func (r *Repository) CreateAttemptForOrder(ctx context.Context, userID, orderID 
 	err = tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM payment_attempts WHERE order_id = $1
-			AND (status IN ('pending', 'paid', 'reconciliation') OR authority IS NOT NULL)
+			AND (status IN ('pending', 'paid', 'reconciliation') OR (authority IS NOT NULL AND status <> 'expired'))
 		)
 	`, orderID).Scan(&active)
 	if err != nil {
@@ -263,7 +263,7 @@ func (r *Repository) EnqueuePaymentSucceeded(ctx context.Context, orderID int64)
 		JOIN users u ON u.id = o.user_id
 		WHERE o.id = $4
 		ON CONFLICT (event_key) DO NOTHING
-	`, notification.EventKey(orderID, "payment_succeeded"), notification.EventTypePaymentSucceeded, payload)
+	`, notification.EventKey(orderID, "payment_succeeded"), notification.EventTypePaymentSucceeded, payload, orderID)
 	if err != nil {
 		return err
 	}
@@ -307,7 +307,7 @@ func (r *Repository) EnqueuePaymentFailed(ctx context.Context, orderID int64) er
 		JOIN users u ON u.id = o.user_id
 		WHERE o.id = $4
 		ON CONFLICT (event_key) DO NOTHING
-	`, notification.EventKey(orderID, "payment_failed"), notification.EventTypePaymentFailed, payload)
+	`, notification.EventKey(orderID, "payment_failed"), notification.EventTypePaymentFailed, payload, orderID)
 	if err != nil {
 		return err
 	}
@@ -351,7 +351,7 @@ func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority stri
 		return VerifyResult{}, err
 	}
 	status := StatusPaid
-	if o.Status != "pending" && o.Status != "processing" && o.Status != "shipped" ||
+	if a.Status == "expired" || o.Status != "pending" && o.Status != "processing" && o.Status != "shipped" ||
 		o.PaymentStatus != "pending" && o.PaymentStatus != "failed" ||
 		o.Total != a.Amount || a.Amount < 10000 || o.Currency != a.Currency || a.Currency != "IRR" || conflictingPayment {
 		status = StatusReconciliation
@@ -359,7 +359,7 @@ func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority stri
 	tag, err := tx.Exec(ctx, `
 		UPDATE payment_attempts
 		SET status = $1, ref_id = $2, provider_code = $3, verified_at = NOW(), updated_at = NOW()
-		WHERE id = $4 AND status IN ('pending', 'failed') AND authority IS NOT NULL
+		WHERE id = $4 AND status IN ('pending', 'failed', 'expired') AND authority IS NOT NULL
 	`, status, refID, providerCode, a.ID)
 	if err != nil {
 		return VerifyResult{}, err
@@ -379,13 +379,13 @@ func (r *Repository) FinalizeVerifiedPayment(ctx context.Context, authority stri
 			return VerifyResult{}, ErrOrderNotPayable
 		}
 	}
+	if status == StatusPaid && r.notifications != nil {
+		if err := r.notifications.OrderEventTx(ctx, tx, a.OrderID, "payment_succeeded"); err != nil {
+			return VerifyResult{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
-	}
-
-	// Enqueue payment_succeeded notification after successful settlement
-	if status == StatusPaid && r.notifications != nil {
-		_ = r.EnqueuePaymentSucceeded(ctx, a.OrderID)
 	}
 
 	return VerifyResult{OrderID: a.OrderID, FinalStatus: status}, nil
@@ -525,14 +525,13 @@ func (r *Repository) FinalizeFailedPayment(ctx context.Context, authority string
 	if err != nil {
 		return VerifyResult{}, err
 	}
+	if a.Status == StatusFailed && r.notifications != nil {
+		if err := r.notifications.OrderEventTx(ctx, tx, a.OrderID, "payment_failed"); err != nil {
+			return VerifyResult{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return VerifyResult{}, err
-	}
-
-	// Enqueue payment_failed notification after authoritative failure
-	// Only enqueue if the payment is in a terminal failed state (not reconciliation)
-	if a.Status == StatusFailed && r.notifications != nil {
-		_ = r.EnqueuePaymentFailed(ctx, a.OrderID)
 	}
 
 	return VerifyResult{OrderID: a.OrderID, FinalStatus: a.Status}, nil

@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const raw = params.get('returnTo') || '/'
+  const returnTo =
+    raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('\\')
+      ? raw
+      : '/'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,7 +31,7 @@ export default function LoginPage() {
 
     try {
       await login({ email: email.trim(), password })
-      navigate('/')
+      navigate(returnTo)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ورود ناموفق بود')
     } finally {
@@ -69,13 +75,23 @@ export default function LoginPage() {
             </p>
           )}
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={submitting}
+          >
             {submitting ? 'در حال ورود...' : 'ورود'}
           </button>
         </form>
 
+        <p>
+          <Link to="/forgot-password">رمز عبور را فراموش کرده‌اید؟</Link>
+        </p>
         <p className="form-footer">
-          حساب کاربری ندارید؟ <Link to="/register">ثبت‌نام کنید</Link>
+          حساب کاربری ندارید؟{' '}
+          <Link to={`/register?returnTo=${encodeURIComponent(returnTo)}`}>
+            ثبت‌نام کنید
+          </Link>
         </p>
       </div>
     </main>

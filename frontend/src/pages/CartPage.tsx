@@ -1,3 +1,4 @@
+import { mergeGuestCart } from '../lib/guestCart'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { deleteCartItem, getCart, updateCartItem } from '../api/cart'
@@ -7,6 +8,9 @@ import { useAuth } from '../hooks/useAuth'
 import { formatToman } from '../lib/format'
 
 export default function CartPage() {
+  const [mergeNotice] = useState(
+    () => sessionStorage.getItem('cart-merge-notice') || '',
+  )
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [cart, setCart] = useState<Cart | null>(null)
@@ -23,13 +27,14 @@ export default function CartPage() {
   }
 
   useEffect(() => {
-    if (authLoading || !user) {
+    if (authLoading) {
       return
     }
 
     let ignore = false
 
-    getCart()
+    ;(user ? mergeGuestCart() : Promise.resolve())
+      .then(() => getCart())
       .then((data) => {
         if (ignore) return
         setCart(data)
@@ -40,7 +45,11 @@ export default function CartPage() {
         if (err instanceof ApiError && err.status === 401) {
           setUnauthorized(true)
         } else {
-          setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سبد خرید پیش آمد')
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'مشکلی در بارگذاری سبد خرید پیش آمد',
+          )
         }
       })
       .finally(() => {
@@ -67,7 +76,11 @@ export default function CartPage() {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
-        setError(err instanceof Error ? err.message : 'مشکلی در به‌روزرسانی کالا پیش آمد')
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'مشکلی در به‌روزرسانی کالا پیش آمد',
+        )
       }
     } finally {
       setPendingItemId(null)
@@ -85,7 +98,9 @@ export default function CartPage() {
       if (err instanceof ApiError && err.status === 401) {
         setUnauthorized(true)
       } else {
-        setError(err instanceof Error ? err.message : 'مشکلی در حذف کالا پیش آمد')
+        setError(
+          err instanceof Error ? err.message : 'مشکلی در حذف کالا پیش آمد',
+        )
       }
     } finally {
       setPendingItemId(null)
@@ -93,22 +108,34 @@ export default function CartPage() {
   }
 
   const handleCheckout = () => {
-    navigate('/checkout')
+    navigate(user ? '/checkout' : '/login?returnTo=%2Fcheckout')
   }
 
-  if (authLoading || (!user && loading)) {
+  if (authLoading) {
     return (
       <main>
+        {mergeNotice && (
+          <p className="alert alert-info" role="status">
+            {mergeNotice}
+          </p>
+        )}
         <h1>سبد خرید شما</h1>
+        {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
         <p className="state-message">در حال بارگذاری سبد خرید...</p>
       </main>
     )
   }
 
-  if (!user || unauthorized) {
+  if (unauthorized) {
     return (
       <main>
+        {mergeNotice && (
+          <p className="alert alert-info" role="status">
+            {mergeNotice}
+          </p>
+        )}
         <h1>سبد خرید شما</h1>
+        {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
         <p className="empty-state">
           برای مشاهده سبد خرید، <Link to="/login">وارد شوید</Link>.
         </p>
@@ -119,7 +146,13 @@ export default function CartPage() {
   if (loading) {
     return (
       <main>
+        {mergeNotice && (
+          <p className="alert alert-info" role="status">
+            {mergeNotice}
+          </p>
+        )}
         <h1>سبد خرید شما</h1>
+        {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
         <p className="state-message">در حال بارگذاری سبد خرید...</p>
       </main>
     )
@@ -128,7 +161,13 @@ export default function CartPage() {
   if (error) {
     return (
       <main>
+        {mergeNotice && (
+          <p className="alert alert-info" role="status">
+            {mergeNotice}
+          </p>
+        )}
         <h1>سبد خرید شما</h1>
+        {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
         <p className="alert alert-error" role="alert">
           {error}
         </p>
@@ -142,7 +181,13 @@ export default function CartPage() {
   if (!cart || cart.items.length === 0) {
     return (
       <main>
+        {mergeNotice && (
+          <p className="alert alert-info" role="status">
+            {mergeNotice}
+          </p>
+        )}
         <h1>سبد خرید شما</h1>
+        {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
         <p className="empty-state">
           سبد خرید شما خالی است. <Link to="/">مشاهده محصولات</Link>
         </p>
@@ -152,7 +197,13 @@ export default function CartPage() {
 
   return (
     <main>
+      {mergeNotice && (
+        <p className="alert alert-info" role="status">
+          {mergeNotice}
+        </p>
+      )}
       <h1>سبد خرید شما</h1>
+      {!user && <p>سبد شما ذخیره می‌شود. برای پرداخت وارد حساب شوید.</p>}
 
       <div className="table-wrap">
         <table>
@@ -176,7 +227,9 @@ export default function CartPage() {
                   <div className="qty-control">
                     <button
                       type="button"
-                      onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                      onClick={() =>
+                        handleQuantityChange(item.id, item.quantity - 1)
+                      }
                       disabled={pendingItemId === item.id || item.quantity <= 1}
                       aria-label={`کم کردن تعداد ${item.name}`}
                     >
@@ -197,7 +250,9 @@ export default function CartPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                      onClick={() =>
+                        handleQuantityChange(item.id, item.quantity + 1)
+                      }
                       disabled={pendingItemId === item.id}
                       aria-label={`افزودن تعداد ${item.name}`}
                     >
@@ -228,7 +283,11 @@ export default function CartPage() {
         </span>
 
         {cart.items.length > 0 && (
-          <button type="button" className="btn btn-primary" onClick={handleCheckout}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleCheckout}
+          >
             ادامه به تسویه حساب
           </button>
         )}

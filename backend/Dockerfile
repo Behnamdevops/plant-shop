@@ -15,7 +15,8 @@ COPY . .
 
 # CGO_ENABLED=0 produces a statically linked binary that runs on the
 # minimal "scratch"-like distroless/alpine runtime without libc issues.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server . && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 # ---- Runtime stage --------------------------------------------------------
 FROM alpine:3.20 AS runtime
@@ -27,6 +28,7 @@ RUN apk add --no-cache ca-certificates && \
 
 WORKDIR /app
 COPY --from=build /out/server /app/server
+COPY --from=build /out/migrate /app/migrate
 # Migrations are applied by the same binary in production (APP_ENV=production)
 # before the HTTP server starts, or manually via `go run ./cmd/migrate`.
 COPY migrations /app/migrations

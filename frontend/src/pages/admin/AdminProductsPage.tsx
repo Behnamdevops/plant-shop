@@ -1,32 +1,33 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { deleteProduct, getProducts } from '../../api/products'
-import { getAdminCategories } from '../../api/categories'
-import { ApiError } from '../../api/errors'
-import type { Product } from '../../types/product'
-import type { Category } from '../../types/category'
-import { formatToman } from '../../lib/format'
+import { kindLabel } from "../../catalog";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { deleteProduct, getProducts } from "../../api/products";
+import { getAdminCategories } from "../../api/categories";
+import { ApiError } from "../../api/errors";
+import type { Product } from "../../types/product";
+import type { Category } from "../../types/category";
+import { formatToman } from "../../lib/format";
 
 // Admin product management shows the full catalog, so it requests the
 // maximum page size instead of paginating — admins need to scan/manage all
 // products, unlike the public storefront where large catalogs must be
 // paginated server-side.
-const ADMIN_PAGE_SIZE = 100
+const ADMIN_PAGE_SIZE = 100;
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[] | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [deletingId, setDeletingId] = useState<number | null>(null)
-  const [deleteError, setDeleteError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
+  const [products, setProducts] = useState<Product[] | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   const reload = () => {
-    setLoading(true)
-    setError('')
-    setReloadKey((key) => key + 1)
-  }
+    setLoading(true);
+    setError("");
+    setReloadKey((key) => key + 1);
+  };
 
   useEffect(() => {
     getAdminCategories()
@@ -34,55 +35,68 @@ export default function AdminProductsPage() {
       .catch(() => {
         /* Category names are a display enhancement only; leave the column
            blank if this fails rather than blocking the product list. */
-      })
-  }, [])
+      });
+  }, []);
 
   useEffect(() => {
-    let ignore = false
+    let ignore = false;
 
     getProducts({ page_size: ADMIN_PAGE_SIZE })
       .then((data) => {
-        if (!ignore) setProducts(data.items)
+        if (!ignore) setProducts(data.items);
       })
       .catch((err) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'مشکلی در بارگذاری محصولات پیش آمد')
+        if (!ignore)
+          setError(
+            err instanceof Error
+              ? err.message
+              : "مشکلی در بارگذاری محصولات پیش آمد",
+          );
       })
       .finally(() => {
-        if (!ignore) setLoading(false)
-      })
+        if (!ignore) setLoading(false);
+      });
 
     return () => {
-      ignore = true
-    }
-  }, [reloadKey])
+      ignore = true;
+    };
+  }, [reloadKey]);
 
   const categoryName = (categoryId: number | null) => {
-    if (categoryId === null) return '—'
-    return categories.find((c) => c.id === categoryId)?.name ?? '—'
-  }
+    if (categoryId === null) return "—";
+    return categories.find((c) => c.id === categoryId)?.name ?? "—";
+  };
 
   const handleDelete = async (product: Product) => {
-    const confirmed = window.confirm(`محصول «${product.name}» حذف شود؟ این عمل قابل بازگشت نیست.`)
+    const confirmed = window.confirm(
+      `محصول «${product.name}» حذف شود؟ این عمل قابل بازگشت نیست.`,
+    );
     if (!confirmed) {
-      return
+      return;
     }
 
-    setDeleteError('')
-    setDeletingId(product.id)
+    setDeleteError("");
+    setDeletingId(product.id);
 
     try {
-      await deleteProduct(product.id)
-      setProducts((current) => (current ? current.filter((p) => p.id !== product.id) : current))
+      await deleteProduct(product.id);
+      setProducts((current) =>
+        current ? current.filter((p) => p.id !== product.id) : current,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setDeleteError(`محصول «${product.name}» به دلیل وجود سفارش‌های مرتبط قابل حذف نیست.`)
+        setDeleteError(
+          `محصول «${product.name}» به دلیل وجود سفارش‌های مرتبط قابل حذف نیست.`,
+        );
       } else {
-        setDeleteError(err instanceof Error ? err.message : 'مشکلی در حذف محصول پیش آمد')
+        setDeleteError(
+          err instanceof Error ? err.message : "مشکلی در حذف محصول پیش آمد",
+        );
       }
     } finally {
-      setDeletingId(null)
+      setDeletingId(null);
     }
-  }
+  };
 
   return (
     <main>
@@ -91,7 +105,7 @@ export default function AdminProductsPage() {
         <p className="page-subtitle">مدیریت فهرست محصولات فروشگاه.</p>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <Link to="/admin/products/new" className="btn btn-primary">
           + محصول جدید
         </Link>
@@ -128,7 +142,9 @@ export default function AdminProductsPage() {
           <table>
             <thead>
               <tr>
+                <th>شناسه</th>
                 <th>نام</th>
+                <th>نوع / برند</th>
                 <th>Slug</th>
                 <th>دسته‌بندی</th>
                 <th>قیمت</th>
@@ -139,14 +155,23 @@ export default function AdminProductsPage() {
             <tbody>
               {products.map((product) => (
                 <tr key={product.id}>
+                  <td>{product.id}</td>
                   <td>{product.name}</td>
+                  <td>
+                    {kindLabel(product.details?.kind)}
+                    <br />
+                    {product.details?.brand}
+                  </td>
                   <td>{product.slug}</td>
                   <td>{categoryName(product.category_id)}</td>
                   <td className="price">{formatToman(product.price)}</td>
                   <td>{product.stock}</td>
                   <td>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <Link to={`/admin/products/${product.id}/edit`} className="btn btn-secondary btn-sm">
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Link
+                        to={`/admin/products/${product.id}/edit`}
+                        className="btn btn-secondary btn-sm"
+                      >
                         ویرایش
                       </Link>
                       <button
@@ -155,7 +180,7 @@ export default function AdminProductsPage() {
                         onClick={() => handleDelete(product)}
                         disabled={deletingId === product.id}
                       >
-                        {deletingId === product.id ? 'در حال حذف...' : 'حذف'}
+                        {deletingId === product.id ? "در حال حذف..." : "حذف"}
                       </button>
                     </div>
                   </td>
@@ -166,5 +191,5 @@ export default function AdminProductsPage() {
         </div>
       )}
     </main>
-  )
+  );
 }

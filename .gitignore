@@ -6,7 +6,11 @@
 .env.*
 !.env.example
 !.env.prod.example
+!.env.local.example
 
 # OS/editor cruft
 .DS_Store
 Thumbs.db
+
+frontend/test-results/
+frontend/playwright-report/

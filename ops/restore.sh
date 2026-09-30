@@ -1,49 +1,23 @@
 #!/bin/sh
-# Restore the production Plant Shop Postgres database from a plain SQL dump.
-#
-# Reads all configuration from the environment; contains no credentials.
-#
-# Required environment variables:
-#   POSTGRES_USER     database user (matches .env.prod POSTGRES_USER)
-#   POSTGRES_DB       database name (matches .env.prod POSTGRES_DB)
-#   RESTORE_FILE      path to the dump produced by ops/backup.sh
-#
-# Optional:
-#   RESTORE_FORCE     set to exactly "yes" to skip the interactive warning.
-#
-# Usage:
-#   ./ops/restore.sh
-#
-# WARNING: this REPLACES the current contents of the target database.
-# Stop the backend first so no writes race the restore:
-#   docker compose -f docker-compose.prod.yml stop backend
+# Restore only to a NEW database and a NEW local upload staging directory.
+# No running application's database or upload volume is overwritten.
 set -eu
-
-: "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${POSTGRES_DB:?POSTGRES_DB is required}"
-: "${RESTORE_FILE:?RESTORE_FILE is required}"
-
-if [ ! -f "${RESTORE_FILE}" ]; then
-  echo "restore file not found: ${RESTORE_FILE}" >&2
-  exit 1
-fi
-
-if [ "${RESTORE_FORCE:-}" != "yes" ]; then
-  echo "This will OVERWRITE database '${POSTGRES_DB}' with ${RESTORE_FILE}."
-  echo "Set RESTORE_FORCE=yes to proceed without this prompt."
-  printf 'Type the database name to confirm: '
-  read -r CONFIRM
-  if [ "${CONFIRM}" != "${POSTGRES_DB}" ]; then
-    echo "aborted" >&2
-    exit 1
-  fi
-fi
-
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
-  < "${RESTORE_FILE}"
-
-echo "restore finished. Verify with the SELECT checks in OPERATIONS.md"
-echo "(row counts on orders/products/users and schema_migrations history),"
-echo "then start the backend again:"
-echo "  docker compose -f docker-compose.prod.yml up -d backend"
+umask 077
+: "${POSTGRES_USER:?required}"
+: "${BACKUP_PATH:?required}"
+: "${RESTORE_DB:?new database name required}"
+: "${RESTORE_UPLOAD_DIR:?new empty directory required}"
+case "$RESTORE_DB" in *[!a-zA-Z0-9_]*|'') echo 'Invalid database name' >&2; exit 1;; esac
+[ ! -e "$RESTORE_UPLOAD_DIR" ] || { echo 'Upload destination already exists' >&2; exit 1; }
+(cd "$BACKUP_PATH" && sha256sum -c SHA256SUMS)
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-.env.prod}"
+compose() { docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
+# createdb fails if the name already exists. Never drop or reuse a database.
+compose exec -T postgres createdb -U "$POSTGRES_USER" "$RESTORE_DB"
+compose exec -T postgres pg_restore -U "$POSTGRES_USER" -d "$RESTORE_DB" --no-owner --no-privileges --single-transaction < "$BACKUP_PATH/database.dump"
+mkdir -p "$RESTORE_UPLOAD_DIR"
+# Only restore trusted backups; tar contains the upload root and articles/.
+tar -xf "$BACKUP_PATH/uploads.tar" -C "$RESTORE_UPLOAD_DIR"
+printf 'Restored new database %s and staged uploads at %s.\n' "$RESTORE_DB" "$RESTORE_UPLOAD_DIR"
+printf 'Verify counts, migration history and images before changing deployment configuration.\n'

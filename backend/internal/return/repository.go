@@ -75,13 +75,31 @@ func (r *Repository) CheckEligibility(ctx context.Context, orderID, userID int64
 // CreateRequest creates a new return request for the given order.
 // It validates eligibility first and returns an error if the order is not eligible.
 func (r *Repository) CreateRequest(ctx context.Context, orderID, userID int64, input RequestInput) (*ReturnRequest, error) {
-	// First check eligibility
-	if err := r.CheckEligibility(ctx, orderID, userID); err != nil {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var status, paymentStatus string
+	if err = tx.QueryRow(ctx, "SELECT status,payment_status FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE", orderID, userID).Scan(&status, &paymentStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrReturnRequestNotFound
+		}
+		return nil, err
+	}
+	if status != order.StatusDelivered || paymentStatus != order.PaymentStatusPaid {
+		return nil, ErrReturnNotEligible
+	}
+	var exists bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM return_requests WHERE order_id=$1)", orderID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, ErrReturnAlreadyExists
 	}
 
 	var rr ReturnRequest
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO return_requests (order_id, user_id, status, reason, customer_note)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, order_id, user_id, status, reason, customer_note, admin_note,
@@ -94,6 +112,14 @@ func (r *Repository) CreateRequest(ctx context.Context, orderID, userID int64, i
 		return nil, err
 	}
 
+	if r.notifications != nil {
+		if err = r.enqueueStatusNotification(ctx, tx, rr.ID, StatusRequested); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 	return &rr, nil
 }
 
@@ -304,13 +330,13 @@ func (r *Repository) UpdateStatus(ctx context.Context, returnRequestID int64, ne
 		rr.ReceivedAt = &t
 	}
 
+	if r.notifications != nil {
+		if err := r.enqueueStatusNotification(ctx, tx, returnRequestID, newStatus); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
-	}
-
-	// Enqueue notification after successful status update
-	if r.notifications != nil {
-		_ = r.enqueueStatusNotification(ctx, returnRequestID, newStatus)
 	}
 
 	return &rr, nil
@@ -331,11 +357,11 @@ func buildUpdateColumns(newStatus string) string {
 }
 
 // enqueueStatusNotification enqueues a notification for a return request status change.
-func (r *Repository) enqueueStatusNotification(ctx context.Context, returnRequestID int64, status string) error {
+func (r *Repository) enqueueStatusNotification(ctx context.Context, tx pgx.Tx, returnRequestID int64, status string) error {
 	// Get the return request and associated order info
 	var orderID int64
 	var email string
-	err := r.db.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT rr.order_id, u.email
 		FROM return_requests rr
 		JOIN users u ON u.id = rr.user_id
@@ -347,7 +373,7 @@ func (r *Repository) enqueueStatusNotification(ctx context.Context, returnReques
 
 	// Get order total for payload
 	var total int64
-	err = r.db.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
+	err = tx.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
 	if err != nil {
 		return err
 	}
@@ -356,6 +382,9 @@ func (r *Repository) enqueueStatusNotification(ctx context.Context, returnReques
 	var message string
 
 	switch status {
+	case StatusRequested:
+		eventType = "return_requested"
+		message = "درخواست مرجوعی شما ثبت شد"
 	case StatusApproved:
 		eventType = "return_approved"
 		message = "درخواست مرجوعی شما تایید شد"
@@ -380,8 +409,7 @@ func (r *Repository) enqueueStatusNotification(ctx context.Context, returnReques
 
 	payload := notification.ReturnRequestPayload(orderID, "مشتری", email, status, message, total)
 
-	_, _ = r.notifications.Enqueue(ctx, notification.EventKeyForReturnRequest(returnRequestID, status), 0, email, eventType, payload)
-	return nil
+	return r.notifications.EnqueueTx(ctx, tx, notification.EventKeyForReturnRequest(returnRequestID, status), 0, email, eventType, payload)
 }
 
 // nullableString returns nil for an empty string and a pointer to s otherwise.

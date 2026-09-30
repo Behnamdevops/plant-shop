@@ -256,22 +256,22 @@ func (r *Repository) UpdateStatus(ctx context.Context, refundID int64, newStatus
 		}
 	}
 
+	if r.notifications != nil {
+		if err := r.enqueueStatusNotification(ctx, tx, refundID, newStatus, orderID); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
-	}
-
-	// Enqueue notification after successful status update
-	if r.notifications != nil {
-		_ = r.enqueueStatusNotification(ctx, refundID, newStatus, orderID)
 	}
 
 	return &refund, nil
 }
 
 // enqueueStatusNotification enqueues a notification for a refund status change.
-func (r *Repository) enqueueStatusNotification(ctx context.Context, refundID int64, status string, orderID int64) error {
+func (r *Repository) enqueueStatusNotification(ctx context.Context, tx pgx.Tx, refundID int64, status string, orderID int64) error {
 	var email string
-	err := r.db.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT u.email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = $1
 	`, orderID).Scan(&email)
 	if err != nil {
@@ -280,7 +280,7 @@ func (r *Repository) enqueueStatusNotification(ctx context.Context, refundID int
 
 	// Get order total for payload
 	var total int64
-	err = r.db.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
+	err = tx.QueryRow(ctx, `SELECT total FROM orders WHERE id = $1`, orderID).Scan(&total)
 	if err != nil {
 		return err
 	}
@@ -304,8 +304,7 @@ func (r *Repository) enqueueStatusNotification(ctx context.Context, refundID int
 
 	payload := notification.RefundPayload(orderID, "مشتری", email, status, message, total)
 
-	_, _ = r.notifications.Enqueue(ctx, notification.EventKeyForRefund(refundID, status), 0, email, eventType, payload)
-	return nil
+	return r.notifications.EnqueueTx(ctx, tx, notification.EventKeyForRefund(refundID, status), 0, email, eventType, payload)
 }
 
 // IsOrderRefunded checks if the given order has been refunded.

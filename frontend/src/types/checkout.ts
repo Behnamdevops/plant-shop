@@ -20,18 +20,17 @@ export type CheckoutInput = {
   coupon_code?: string
 }
 
-// SHIPPING_FEES mirrors backend/internal/order/shipping.go's
-// ShippingFeeStandard / ShippingFeeExpress constants, in the same minor
-// currency unit as product prices. This is used ONLY to show an estimated
-// fee/total to the customer before they submit checkout — the server is
-// always authoritative and recalculates the real fee itself; the actual
-// order returned by createOrder() reflects the true, server-calculated
-// values. There is no rates endpoint in V1 (no carrier integration), so if
-// the backend constants ever change, update this map to match so the UX
-// preview doesn't drift from what the server will actually charge.
-export const SHIPPING_FEES: Record<ShippingMethod, number> = {
-  standard: 500,
-  express: 1500,
+export type ShippingRates = {
+  standard: number
+  express: number
+  free_shipping_threshold: number
+  configured: boolean
+  payments_enabled: boolean
+}
+export async function getShippingRates(): Promise<ShippingRates> {
+  const response = await fetch('/api/v1/shipping')
+  if (!response.ok) throw new Error('دریافت هزینه ارسال انجام نشد.')
+  return response.json()
 }
 
 export function emptyCheckoutInput(): CheckoutInput {

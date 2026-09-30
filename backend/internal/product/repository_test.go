@@ -208,3 +208,26 @@ func TestRepositoryUpdateDuplicateSlug(t *testing.T) {
 		t.Fatalf("expected ErrDuplicateSlug, got %v", err)
 	}
 }
+
+func TestSlugChangeKeepsOldURLAndReservesHistory(t *testing.T) {
+	r := newTestRepository(t)
+	old := uniqueSlug("historical")
+	p, err := r.Create(t.Context(), CreateProductInput{Name: "History", Slug: old, Price: 100, Stock: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.db.Exec(context.Background(), "DELETE FROM products WHERE id=$1", p.ID)
+	next := old + "-new"
+	_, err = r.Update(t.Context(), p.ID, UpdateProductInput{Name: &p.Name, Slug: &next, Description: &p.Description, Price: &p.Price, Stock: &p.Stock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias, err := r.GetBySlug(t.Context(), old)
+	if err != nil || alias.ID != p.ID || alias.Slug != next {
+		t.Fatalf("alias result: %+v %v", alias, err)
+	}
+	_, err = r.Create(t.Context(), CreateProductInput{Name: "Other", Slug: old, Price: 100, Stock: 2})
+	if !errors.Is(err, ErrDuplicateSlug) {
+		t.Fatalf("history reused: %v", err)
+	}
+}

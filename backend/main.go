@@ -5,8 +5,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/Behnamdevops/plant-shop/backend/internal/product"
 	"github.com/Behnamdevops/plant-shop/backend/internal/refund"
 	returnpkg "github.com/Behnamdevops/plant-shop/backend/internal/return"
+	"github.com/Behnamdevops/plant-shop/backend/internal/seo"
 	"github.com/Behnamdevops/plant-shop/backend/internal/storage"
 	"github.com/Behnamdevops/plant-shop/backend/internal/upload"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -104,8 +108,14 @@ func run() error {
 	// Notifications
 	notificationRepository := notification.NewRepository(db)
 	notificationHandler := notification.NewHandler(notificationRepository, authHandler)
+	authHandler.Recovery(notificationRepository, paymentConfig.FrontendBaseURL, cfg.Notification.Enabled)
 
-	orderRepository := order.NewRepository(db)
+	shippingConfig, err := order.LoadShipping(os.Getenv, isProduction)
+	if err != nil {
+		return err
+	}
+	shippingConfig.PaymentsEnabled = paymentConfig.Enabled
+	orderRepository := order.NewRepository(db).WithShipping(shippingConfig)
 	orderRepository.WithNotifications(notificationRepository)
 	orderHandler := order.NewHandler(orderRepository, authHandler)
 
@@ -147,6 +157,21 @@ func run() error {
 	refundHandler := refund.NewHandler(refundRepository, refundProvider, authHandler, returnRepository)
 
 	mux := http.NewServeMux()
+	publicOrigin := os.Getenv("PUBLIC_BASE_URL")
+	if publicOrigin == "" {
+		publicOrigin = paymentConfig.FrontendBaseURL
+	}
+	if publicOrigin == "" {
+		publicOrigin = "http://localhost:4173"
+	}
+	u, err := url.Parse(publicOrigin)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") || (isProduction && u.Scheme != "https") {
+		return errors.New("PUBLIC_BASE_URL must be a store origin (HTTPS in production)")
+	}
+	publicOrigin = strings.TrimSuffix(publicOrigin, "/")
+	seoHandler := seo.New(db, publicOrigin)
+	mux.HandleFunc("GET /sitemap.xml", seoHandler.Sitemap)
+	mux.HandleFunc("GET /robots.txt", seoHandler.Robots)
 
 	mux.HandleFunc("GET /health", operational.Health)
 	mux.HandleFunc("GET /healthz", operational.Health)
@@ -161,9 +186,21 @@ func run() error {
 	mux.Handle("POST /api/v1/auth/login", limited(authHandler.Login))
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
 	mux.HandleFunc("GET /api/v1/me", authHandler.Me)
+	mux.Handle("POST /api/v1/auth/forgot-password", limited(authHandler.ForgotPassword))
+	mux.Handle("POST /api/v1/auth/reset-password", limited(authHandler.ResetPassword))
+	mux.HandleFunc("POST /api/v1/cart/merge", cartHandler.Merge)
+	mux.HandleFunc("GET /api/v1/shipping", orderHandler.Shipping)
+	mux.HandleFunc("GET /api/v1/wishlist", productHandler.Wishlist)
+	mux.HandleFunc("POST /api/v1/wishlist/merge", productHandler.MergeWishlist)
+	mux.HandleFunc("DELETE /api/v1/wishlist/{id}", productHandler.DeleteWishlist)
+	mux.HandleFunc("GET /api/v1/products/{id}/reviews", productHandler.Reviews)
+	mux.Handle("POST /api/v1/products/{id}/reviews", limited(productHandler.SubmitReview))
+	mux.HandleFunc("GET /api/v1/admin/reviews", productHandler.AdminReviews)
+	mux.HandleFunc("PATCH /api/v1/admin/reviews/{id}", productHandler.ModerateReview)
 
 	mux.HandleFunc("GET /api/v1/products", productHandler.List)
 	mux.HandleFunc("GET /api/v1/products/{slug}", productHandler.GetBySlug)
+	mux.HandleFunc("GET /api/v1/products/{slug}/related", productHandler.Related)
 	mux.HandleFunc("POST /api/v1/admin/products", productHandler.Create)
 	mux.HandleFunc("GET /api/v1/admin/products/{id}", productHandler.GetByID)
 	mux.HandleFunc("PUT /api/v1/admin/products/{id}", productHandler.Update)
@@ -277,13 +314,21 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           operational.Logging(slog.Default(), mux),
+		Handler:           operational.Logging(slog.Default(), http.NewCrossOriginProtection().Handler(operational.BodyLimit(mux))),
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
+	reservationMinutes := 30
+	if raw := os.Getenv("ORDER_RESERVATION_TTL_MINUTES"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 15 || n > 1440 {
+			return errors.New("ORDER_RESERVATION_TTL_MINUTES must be 15..1440")
+		}
+		reservationMinutes = n
+	}
 	// Run the server in the background so we can listen for shutdown
 	// signals on the main goroutine and drain in-flight requests instead of
 	// killing the process mid-request.
@@ -298,6 +343,27 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				work, cancel := context.WithTimeout(ctx, 45*time.Second)
+				cutoff := time.Now().Add(-time.Duration(reservationMinutes) * time.Minute)
+				if err := paymentHandler.ExpireAbandoned(work, cutoff); err != nil {
+					slog.Warn("payment maintenance failed")
+				}
+				_ = authRepository.CleanupExpired(work)
+				if _, err := orderRepository.ExpireReservations(work, cutoff); err != nil {
+					slog.Warn("reservation maintenance failed")
+				}
+				cancel()
+			}
+		}
+	}()
 
 	// Start notification worker
 	var notificationWorker *notification.Worker

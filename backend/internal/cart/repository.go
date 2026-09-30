@@ -25,6 +25,9 @@ func (r *Repository) AddItem(ctx context.Context, userID, productID int64, quant
 		return Item{}, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT id FROM users WHERE id=$1 FOR UPDATE", userID); err != nil {
+		return Item{}, err
+	}
 
 	var stock int
 	err = tx.QueryRow(ctx, `SELECT stock FROM products WHERE id = $1`, productID).Scan(&stock)
@@ -95,6 +98,9 @@ func (r *Repository) UpdateItemQuantity(ctx context.Context, userID, itemID int6
 		return Item{}, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT id FROM users WHERE id=$1 FOR UPDATE", userID); err != nil {
+		return Item{}, err
+	}
 
 	var productID int64
 	err = tx.QueryRow(ctx, `
@@ -144,23 +150,28 @@ func (r *Repository) UpdateItemQuantity(ctx context.Context, userID, itemID int6
 // DeleteItem removes a cart item belonging to userID. Returns ErrItemNotFound
 // if the item does not exist or belongs to another user.
 func (r *Repository) DeleteItem(ctx context.Context, userID, itemID int64) error {
-	tag, err := r.db.Exec(ctx, `
-		DELETE FROM cart_items
-		WHERE id = $1 AND user_id = $2
-	`, itemID, userID)
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT id FROM users WHERE id=$1 FOR UPDATE", userID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, "DELETE FROM cart_items WHERE id=$1 AND user_id=$2", itemID, userID)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // GetCart returns all cart items for userID enriched with product data.
 func (r *Repository) GetCart(ctx context.Context, userID int64) (Cart, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT ci.id, ci.product_id, p.name, p.slug, p.price, ci.quantity
+		SELECT ci.id, ci.product_id, p.name, p.slug, p.price, ci.quantity, COALESCE(p.details->>'kind','')
 		FROM cart_items ci
 		JOIN products p ON p.id = ci.product_id
 		WHERE ci.user_id = $1
@@ -176,7 +187,7 @@ func (r *Repository) GetCart(ctx context.Context, userID int64) (Cart, error) {
 
 	for rows.Next() {
 		var v ItemView
-		if err := rows.Scan(&v.ID, &v.ProductID, &v.Name, &v.Slug, &v.Price, &v.Quantity); err != nil {
+		if err := rows.Scan(&v.ID, &v.ProductID, &v.Name, &v.Slug, &v.Price, &v.Quantity, &v.Kind); err != nil {
 			return Cart{}, err
 		}
 		v.Subtotal = v.Price * int64(v.Quantity)

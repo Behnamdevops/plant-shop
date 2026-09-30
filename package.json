@@ -1,0 +1,17 @@
+{
+  "name": "plant-shop-workspace",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "setup": "npm --prefix frontend ci",
+    "dev": "node scripts/local.mjs",
+    "start": "node scripts/local.mjs --ssr",
+    "build": "npm --prefix frontend run build",
+    "check": "npm --prefix frontend run lint",
+    "admin": "node scripts/admin.mjs"
+  }
+}

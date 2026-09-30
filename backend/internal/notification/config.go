@@ -3,6 +3,9 @@ package notification
 import (
 	"errors"
 	"fmt"
+	"net/mail"
+	"strconv"
+	"strings"
 )
 
 // Config holds email notification configuration loaded from environment variables.
@@ -26,6 +29,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.Enabled = false
 		return cfg, nil
 	}
+	if enabled != "true" {
+		return cfg, errors.New("EMAIL_ENABLED must be true or false")
+	}
 	cfg.Enabled = true
 
 	cfg.SMTPHost = getenv("SMTP_HOST")
@@ -33,19 +39,14 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return cfg, errors.New("SMTP_HOST is required when EMAIL_ENABLED=true")
 	}
 
-	cfg.SMTPPort = 587 // default
-	if port := getenv("SMTP_PORT"); port != "" {
-		cfg.SMTPPort = 587 // Use 587 as default when port is specified
-	}
-
-	if port := getenv("SMTP_PORT"); port != "" {
-		if port == "25" || port == "465" || port == "587" {
-			// Valid common ports
-		} else {
-			cfg.SMTPPort = 587 // Default to 587 for non-standard ports
+	cfg.SMTPPort = 587
+	if raw := getenv("SMTP_PORT"); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil || port < 1 || port > 65535 {
+			return cfg, errors.New("invalid SMTP_PORT")
 		}
+		cfg.SMTPPort = port
 	}
-
 	cfg.SMTPUsername = getenv("SMTP_USERNAME")
 	if cfg.SMTPUsername == "" {
 		return cfg, errors.New("SMTP_USERNAME is required when EMAIL_ENABLED=true")
@@ -73,6 +74,16 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.SMTPUseTLS = false
 	}
 
+	address, err := mail.ParseAddress(cfg.SMTPFromEmail)
+	if err != nil || address.Address != cfg.SMTPFromEmail {
+		return cfg, errors.New("invalid SMTP_FROM_EMAIL")
+	}
+	if strings.ContainsAny(cfg.SMTPFromName, "\r\n") || strings.ContainsAny(cfg.SMTPHost, "\r\n") {
+		return cfg, errors.New("invalid SMTP headers")
+	}
+	if useTLS != "" && useTLS != "true" && useTLS != "false" {
+		return cfg, errors.New("SMTP_USE_TLS must be true or false")
+	}
 	return cfg, nil
 }
 

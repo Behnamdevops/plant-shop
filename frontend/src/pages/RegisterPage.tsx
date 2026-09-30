@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 export default function RegisterPage() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const raw = params.get('returnTo') || '/'
+  const returnTo =
+    raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('\\')
+      ? raw
+      : '/'
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -31,7 +37,7 @@ export default function RegisterPage() {
 
     try {
       await register({ name: name.trim(), email: email.trim(), password })
-      navigate('/')
+      navigate(returnTo)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ثبت‌نام ناموفق بود')
     } finally {
@@ -88,13 +94,20 @@ export default function RegisterPage() {
             </p>
           )}
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={submitting}
+          >
             {submitting ? 'در حال ثبت‌نام...' : 'ثبت‌نام'}
           </button>
         </form>
 
         <p className="form-footer">
-          قبلاً حساب کاربری ساخته‌اید؟ <Link to="/login">وارد شوید</Link>
+          قبلاً حساب کاربری ساخته‌اید؟{' '}
+          <Link to={`/login?returnTo=${encodeURIComponent(returnTo)}`}>
+            وارد شوید
+          </Link>
         </p>
       </div>
     </main>

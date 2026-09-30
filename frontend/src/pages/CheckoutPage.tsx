@@ -1,183 +1,204 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { getCart } from '../api/cart'
-import { previewCoupon } from '../api/coupons'
-import { createOrder } from '../api/orders'
-import { requestZarinPalPayment } from '../api/payments'
-import { listAddresses } from '../api/addresses'
-import { ApiError } from '../api/errors'
-import type { Cart } from '../types/cart'
-import type { CouponPreview } from '../types/coupon'
-import type { Address } from '../api/addresses'
-import { emptyCheckoutInput, SHIPPING_FEES } from '../types/checkout'
-import type { CheckoutInput } from '../types/checkout'
-import { SHIPPING_METHODS } from '../types/order'
-import type { ShippingMethod } from '../types/order'
-import { useAuth } from '../hooks/useAuth'
-import { formatToman } from '../lib/format'
-import { shippingMethodLabel } from '../lib/labels'
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { getCart } from "../api/cart";
+import { previewCoupon } from "../api/coupons";
+import { createOrder } from "../api/orders";
+import { requestZarinPalPayment } from "../api/payments";
+import { listAddresses } from "../api/addresses";
+import { ApiError } from "../api/errors";
+import type { Cart } from "../types/cart";
+import type { CouponPreview } from "../types/coupon";
+import type { Address } from "../api/addresses";
+import { emptyCheckoutInput, getShippingRates } from "../types/checkout";
+import type { ShippingRates, CheckoutInput } from "../types/checkout";
+import { SHIPPING_METHODS } from "../types/order";
+import { useAuth } from "../hooks/useAuth";
+import { formatToman } from "../lib/format";
+import { shippingMethodLabel } from "../lib/labels";
 
 export default function CheckoutPage() {
-  const { user, loading: authLoading } = useAuth()
-  const navigate = useNavigate()
+  const { user, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
 
-  const [cart, setCart] = useState<Cart | null>(null)
-  const [addresses, setAddresses] = useState<Address[]>([])
-  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [unauthorized, setUnauthorized] = useState(false)
+  const [rates, setRates] = useState<ShippingRates | null>(null);
+  const [cart, setCart] = useState<Cart | null>(null);
+  const digital =
+    !!cart?.items.length && cart.items.every((i) => i.kind === "education");
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [unauthorized, setUnauthorized] = useState(false);
 
-  const [form, setForm] = useState<CheckoutInput>(emptyCheckoutInput())
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState('')
+  const [form, setForm] = useState<CheckoutInput>(emptyCheckoutInput());
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   // redirecting is set once the order was created successfully and we're
   // waiting on the ZarinPal payment-request call before navigating the
   // browser away to the gateway — kept separate from `submitting` so the
   // button/message can say something more specific ("در حال انتقال به
   // درگاه پرداخت...") than the generic "در حال ثبت سفارش...".
-  const [redirecting, setRedirecting] = useState(false)
+  const [redirecting, setRedirecting] = useState(false);
 
   // Coupon state. `appliedCoupon` holds the last successful preview — it is
   // shown to the customer for the estimated breakdown ONLY. The actual
   // discount used to create the order is always recalculated server-side
   // inside the checkout transaction; this preview is never sent as an
   // authoritative amount.
-  const [couponInput, setCouponInput] = useState('')
-  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreview | null>(null)
-  const [couponLoading, setCouponLoading] = useState(false)
-  const [couponError, setCouponError] = useState('')
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreview | null>(
+    null,
+  );
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState("");
 
   useEffect(() => {
     if (authLoading || !user) {
-      return
+      return;
     }
 
-    let ignore = false
+    let ignore = false;
 
-    Promise.all([getCart(), listAddresses()])
-      .then(([cartData, addressesData]) => {
+    Promise.all([getCart(), listAddresses(), getShippingRates()])
+      .then(([cartData, addressesData, shippingRates]) => {
         if (!ignore) {
-          setCart(cartData)
-          setAddresses(addressesData)
+          setRates(shippingRates);
+          setCart(cartData);
+          setAddresses(addressesData);
           // Set selected address to default if exists
-          const defaultAddress = addressesData.find(addr => addr.is_default)
+          const defaultAddress = addressesData.find((addr) => addr.is_default);
           if (defaultAddress) {
-            setSelectedAddressId(defaultAddress.id)
+            setSelectedAddressId(defaultAddress.id);
             // Prefill form with default address
-            setForm(prev => ({
+            setForm((prev) => ({
               ...prev,
               recipient_name: defaultAddress.recipient_name,
               phone: defaultAddress.phone,
               address_line1: defaultAddress.address_line1,
-              address_line2: defaultAddress.address_line2 || '',
+              address_line2: defaultAddress.address_line2 || "",
               city: defaultAddress.city,
               postal_code: defaultAddress.postal_code,
               country: defaultAddress.country,
-            }))
+            }));
           }
         }
       })
       .catch((err) => {
-        if (ignore) return
+        if (ignore) return;
         if (err instanceof ApiError && err.status === 401) {
-          setUnauthorized(true)
+          setUnauthorized(true);
         } else {
-          setLoadError(err instanceof Error ? err.message : 'مشکلی در بارگذاری سبد خرید پیش آمد')
+          setLoadError(
+            err instanceof Error
+              ? err.message
+              : "مشکلی در بارگذاری سبد خرید پیش آمد",
+          );
         }
       })
       .finally(() => {
-        if (!ignore) setLoading(false)
-      })
+        if (!ignore) setLoading(false);
+      });
 
     return () => {
-      ignore = true
-    }
-  }, [authLoading, user])
+      ignore = true;
+    };
+  }, [authLoading, user]);
 
-  const handleChange = (field: keyof CheckoutInput) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm((prev) => ({ ...prev, [field]: event.target.value }))
-    // When user manually edits a field, clear selected address
-    if (field !== 'coupon_code' && field !== 'shipping_method') {
-      setSelectedAddressId(null)
-    }
-  }
+  const handleChange =
+    (field: keyof CheckoutInput) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      setForm((prev) => ({ ...prev, [field]: event.target.value }));
+      // When user manually edits a field, clear selected address
+      if (field !== "coupon_code" && field !== "shipping_method") {
+        setSelectedAddressId(null);
+      }
+    };
 
   const handleAddressSelect = (address: Address) => {
-    setSelectedAddressId(address.id)
+    setSelectedAddressId(address.id);
     setForm({
       ...form,
       recipient_name: address.recipient_name,
       phone: address.phone,
       address_line1: address.address_line1,
-      address_line2: address.address_line2 || '',
+      address_line2: address.address_line2 || "",
       city: address.city,
       postal_code: address.postal_code,
       country: address.country,
-    })
-  }
+    });
+  };
 
   const handleApplyCoupon = async () => {
-    const code = couponInput.trim()
+    const code = couponInput.trim();
     if (!code) {
-      return
+      return;
     }
-    setCouponError('')
-    setCouponLoading(true)
+    setCouponError("");
+    setCouponLoading(true);
     try {
-      const preview = await previewCoupon(code)
-      setAppliedCoupon(preview)
+      const preview = await previewCoupon(code);
+      setAppliedCoupon(preview);
     } catch (err) {
-      setAppliedCoupon(null)
-      if (err instanceof ApiError && (err.status === 400 || err.status === 404)) {
-        setCouponError(err.message || 'این کد تخفیف معتبر نیست.')
+      setAppliedCoupon(null);
+      if (
+        err instanceof ApiError &&
+        (err.status === 400 || err.status === 404)
+      ) {
+        setCouponError(err.message || "این کد تخفیف معتبر نیست.");
       } else {
-        setCouponError('بررسی کد تخفیف با مشکل مواجه شد.')
+        setCouponError("بررسی کد تخفیف با مشکل مواجه شد.");
       }
     } finally {
-      setCouponLoading(false)
+      setCouponLoading(false);
     }
-  }
+  };
 
   const handleRemoveCoupon = () => {
-    setAppliedCoupon(null)
-    setCouponInput('')
-    setCouponError('')
-  }
+    setAppliedCoupon(null);
+    setCouponInput("");
+    setCouponError("");
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setSubmitError('')
-    setSubmitting(true)
+    event.preventDefault();
+    setSubmitError("");
+    setSubmitting(true);
 
     // Step 1: create the order. The order is created with payment_status
     // "pending" — it is never shown to the customer as paid at this point.
     // The applied coupon's preview amount is NEVER sent — only the code
     // itself — and the backend always revalidates/recalculates the
     // discount from scratch inside the checkout transaction.
-    const checkoutInput: CheckoutInput = appliedCoupon ? { ...form, coupon_code: appliedCoupon.code } : form
-    let orderId: number
+    const checkoutInput: CheckoutInput = appliedCoupon
+      ? { ...form, coupon_code: appliedCoupon.code }
+      : { ...form };
+    if (digital) checkoutInput.shipping_method = "digital";
+    let orderId: number;
     try {
-      const order = await createOrder(checkoutInput)
-      orderId = order.id
+      const order = await createOrder(checkoutInput);
+      orderId = order.id;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setUnauthorized(true)
+        setUnauthorized(true);
       } else if (err instanceof ApiError && err.status === 400) {
         // A 400 here can also mean the coupon became invalid/used between
         // preview and submission. Show the backend's message and drop the
         // coupon so the customer can immediately retry without it.
-        setSubmitError(err.message || 'لطفاً اطلاعات ارسال را بررسی و دوباره تلاش کنید.')
+        setSubmitError(
+          err.message || "لطفاً اطلاعات ارسال را بررسی و دوباره تلاش کنید.",
+        );
         if (appliedCoupon) {
-          setAppliedCoupon(null)
+          setAppliedCoupon(null);
         }
       } else if (err instanceof ApiError && err.status === 409) {
-        setSubmitError('موجودی برخی از کالاها کافی نیست.')
+        setSubmitError("موجودی برخی از کالاها کافی نیست.");
       } else {
-        setSubmitError('ثبت سفارش با مشکل مواجه شد.')
+        setSubmitError("ثبت سفارش با مشکل مواجه شد.");
       }
-      setSubmitting(false)
-      return
+      setSubmitting(false);
+      return;
     }
 
     // Step 2: the order exists but is unpaid — immediately request a
@@ -185,30 +206,30 @@ export default function CheckoutPage() {
     // If this step fails (provider unavailable, network error), the order
     // itself is safe and unaffected: the customer can retry payment from
     // the order detail page at any time (see OrderDetailPage/OrdersPage).
-    setSubmitting(false)
-    setRedirecting(true)
+    setSubmitting(false);
+    setRedirecting(true);
     try {
-      const { redirect_url } = await requestZarinPalPayment(orderId)
-      window.location.assign(redirect_url)
+      const { redirect_url } = await requestZarinPalPayment(orderId);
+      window.location.assign(redirect_url);
     } catch {
       // Do not show a raw English provider error; the order is safely
       // pending and payable again from its detail page.
       navigate(`/orders/${orderId}`, {
         state: {
           notice:
-            'سفارش شما ثبت شد، اما اتصال به درگاه پرداخت زرین‌پال با مشکل مواجه شد. می‌توانید دوباره تلاش کنید.',
+            "سفارش شما ثبت شد، اما اتصال به درگاه پرداخت زرین‌پال با مشکل مواجه شد. می‌توانید دوباره تلاش کنید.",
         },
-      })
+      });
     }
-  }
+  };
 
-  if (authLoading || (!user && loading)) {
+  if (authLoading) {
     return (
       <main>
         <h1>تسویه حساب</h1>
         <p className="state-message">در حال بارگذاری...</p>
       </main>
-    )
+    );
   }
 
   if (!user || unauthorized) {
@@ -216,10 +237,11 @@ export default function CheckoutPage() {
       <main>
         <h1>تسویه حساب</h1>
         <p className="empty-state">
-          برای تسویه حساب، <Link to="/login">وارد شوید</Link>.
+          برای تسویه حساب،{" "}
+          <Link to="/login?returnTo=%2Fcheckout">وارد شوید</Link>.
         </p>
       </main>
-    )
+    );
   }
 
   if (loading) {
@@ -228,7 +250,7 @@ export default function CheckoutPage() {
         <h1>تسویه حساب</h1>
         <p className="state-message">در حال بارگذاری...</p>
       </main>
-    )
+    );
   }
 
   if (loadError) {
@@ -242,7 +264,7 @@ export default function CheckoutPage() {
           → بازگشت به سبد خرید
         </Link>
       </main>
-    )
+    );
   }
 
   if (!cart || cart.items.length === 0) {
@@ -253,15 +275,23 @@ export default function CheckoutPage() {
           سبد خرید شما خالی است. <Link to="/">مشاهده محصولات</Link>
         </p>
       </main>
-    )
+    );
   }
 
-  const shippingFee = SHIPPING_FEES[form.shipping_method]
-  const itemsSubtotal = cart.total
-  const discountAmount = appliedCoupon ? appliedCoupon.discount_amount : 0
-  const estimatedTotal = itemsSubtotal - discountAmount + shippingFee
+  const itemsSubtotal = cart.total;
+  const discountAmount = appliedCoupon ? appliedCoupon.discount_amount : 0;
+  const shippingFee = digital
+    ? 0
+    : form.shipping_method === "standard" &&
+        !!rates?.free_shipping_threshold &&
+        cart.total - discountAmount >= rates.free_shipping_threshold
+      ? 0
+      : (form.shipping_method === "digital"
+          ? 0
+          : rates?.[form.shipping_method]) || 0;
+  const estimatedTotal = itemsSubtotal - discountAmount + shippingFee;
 
-  const busy = submitting || redirecting
+  const busy = submitting || redirecting;
 
   return (
     <main>
@@ -273,13 +303,21 @@ export default function CheckoutPage() {
 
       <div className="checkout-layout">
         <form className="form-card checkout-form" onSubmit={handleSubmit}>
-          <h2>اطلاعات ارسال</h2>
+          <h2>
+            {digital ? "اطلاعات ارتباط برای آموزش / مشاوره" : "اطلاعات ارسال"}
+          </h2>
+          {digital && (
+            <p className="alert">
+              این سفارش ارسال فیزیکی ندارد. ارائهٔ خدمت مطابق توضیحات محصول و پس
+              از تأیید پرداخت انجام می‌شود.
+            </p>
+          )}
 
           {addresses.length > 0 && (
             <div className="form-field">
               <label>انتخاب از آدرس‌های ذخیره شده</label>
               <div className="address-selector">
-                {addresses.map(address => (
+                {addresses.map((address) => (
                   <div key={address.id} className="address-option">
                     <input
                       type="radio"
@@ -289,10 +327,15 @@ export default function CheckoutPage() {
                       onChange={() => handleAddressSelect(address)}
                       disabled={busy}
                     />
-                    <label htmlFor={`address-${address.id}`} className="address-label">
+                    <label
+                      htmlFor={`address-${address.id}`}
+                      className="address-label"
+                    >
                       <span className="address-title">
-                        {address.label || 'آدرس بدون عنوان'}
-                        {address.is_default && <span className="default-badge">پیش‌فرض</span>}
+                        {address.label || "آدرس بدون عنوان"}
+                        {address.is_default && (
+                          <span className="default-badge">پیش‌فرض</span>
+                        )}
                       </span>
                       <span className="address-details">
                         {address.recipient_name} — {address.phone}
@@ -307,7 +350,8 @@ export default function CheckoutPage() {
                 ))}
               </div>
               <p className="form-hint">
-                انتخاب یک آدرس، فیلدهای زیر را پر می‌کند. می‌توانید پس از انتخاب، اطلاعات را ویرایش کنید.
+                انتخاب یک آدرس، فیلدهای زیر را پر می‌کند. می‌توانید پس از
+                انتخاب، اطلاعات را ویرایش کنید.
               </p>
             </div>
           )}
@@ -320,7 +364,7 @@ export default function CheckoutPage() {
               required
               maxLength={255}
               value={form.recipient_name}
-              onChange={handleChange('recipient_name')}
+              onChange={handleChange("recipient_name")}
               disabled={busy}
             />
           </div>
@@ -335,7 +379,7 @@ export default function CheckoutPage() {
               placeholder="09xxxxxxxxx"
               inputMode="tel"
               value={form.phone}
-              onChange={handleChange('phone')}
+              onChange={handleChange("phone")}
               disabled={busy}
             />
           </div>
@@ -345,10 +389,10 @@ export default function CheckoutPage() {
             <input
               id="address_line1"
               type="text"
-              required
+              required={!digital}
               maxLength={255}
               value={form.address_line1}
-              onChange={handleChange('address_line1')}
+              onChange={handleChange("address_line1")}
               disabled={busy}
             />
           </div>
@@ -360,7 +404,7 @@ export default function CheckoutPage() {
               type="text"
               maxLength={255}
               value={form.address_line2}
-              onChange={handleChange('address_line2')}
+              onChange={handleChange("address_line2")}
               disabled={busy}
             />
           </div>
@@ -370,10 +414,10 @@ export default function CheckoutPage() {
             <input
               id="city"
               type="text"
-              required
+              required={!digital}
               maxLength={128}
               value={form.city}
-              onChange={handleChange('city')}
+              onChange={handleChange("city")}
               disabled={busy}
             />
           </div>
@@ -383,11 +427,11 @@ export default function CheckoutPage() {
             <input
               id="postal_code"
               type="text"
-              required
+              required={!digital}
               maxLength={32}
               inputMode="numeric"
               value={form.postal_code}
-              onChange={handleChange('postal_code')}
+              onChange={handleChange("postal_code")}
               disabled={busy}
             />
           </div>
@@ -397,29 +441,34 @@ export default function CheckoutPage() {
             <input
               id="country"
               type="text"
-              required
+              required={!digital}
               maxLength={128}
               value={form.country}
-              onChange={handleChange('country')}
+              onChange={handleChange("country")}
               disabled={busy}
             />
           </div>
 
-          <div className="form-field">
-            <label htmlFor="shipping_method">روش ارسال</label>
-            <select
-              id="shipping_method"
-              value={form.shipping_method}
-              onChange={handleChange('shipping_method')}
-              disabled={busy}
-            >
-              {SHIPPING_METHODS.map((method: ShippingMethod) => (
-                <option key={method} value={method}>
-                  {shippingMethodLabel(method)} — {formatToman(SHIPPING_FEES[method])}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!digital && (
+            <div className="form-field">
+              <label htmlFor="shipping_method">روش ارسال</label>
+              <select
+                id="shipping_method"
+                value={form.shipping_method}
+                onChange={handleChange("shipping_method")}
+                disabled={busy}
+              >
+                {SHIPPING_METHODS.filter((m) => m !== "digital").map(
+                  (method) => (
+                    <option key={method} value={method}>
+                      {shippingMethodLabel(method)} —{" "}
+                      {formatToman(rates?.[method] || 0)}
+                    </option>
+                  ),
+                )}
+              </select>
+            </div>
+          )}
 
           {submitError && (
             <p className="alert alert-error" role="alert">
@@ -427,12 +476,22 @@ export default function CheckoutPage() {
             </p>
           )}
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+          {(!rates?.configured || !rates?.payments_enabled) && (
+            <p role="status">
+              ثبت سفارش آنلاین فعلاً فعال نیست. برای خرید با پشتیبانی تماس
+              بگیرید.
+            </p>
+          )}
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={busy || !rates?.configured || !rates?.payments_enabled}
+          >
             {redirecting
-              ? 'در حال انتقال به درگاه پرداخت زرین‌پال...'
+              ? "در حال انتقال به درگاه پرداخت زرین‌پال..."
               : submitting
-                ? 'در حال ثبت سفارش...'
-                : 'ثبت سفارش و پرداخت'}
+                ? "در حال ثبت سفارش..."
+                : "ثبت سفارش و پرداخت"}
           </button>
         </form>
 
@@ -462,7 +521,7 @@ export default function CheckoutPage() {
 
           <div className="form-field">
             <label htmlFor="coupon-code">کد تخفیف</label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
               <input
                 id="coupon-code"
                 type="text"
@@ -472,7 +531,14 @@ export default function CheckoutPage() {
                 placeholder="کد تخفیف را وارد کنید"
               />
               {appliedCoupon ? (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={handleRemoveCoupon} disabled={busy}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleRemoveCoupon}
+                  disabled={
+                    busy || !rates?.configured || !rates?.payments_enabled
+                  }
+                >
                   حذف کد تخفیف
                 </button>
               ) : (
@@ -482,7 +548,7 @@ export default function CheckoutPage() {
                   onClick={handleApplyCoupon}
                   disabled={busy || couponLoading || !couponInput.trim()}
                 >
-                  {couponLoading ? 'در حال بررسی...' : 'اعمال کد تخفیف'}
+                  {couponLoading ? "در حال بررسی..." : "اعمال کد تخفیف"}
                 </button>
               )}
             </div>
@@ -510,7 +576,13 @@ export default function CheckoutPage() {
               </div>
             )}
             <div className="checkout-summary__row">
-              <span>هزینه ارسال ({shippingMethodLabel(form.shipping_method)})</span>
+              <span>
+                هزینه ارسال (
+                {shippingMethodLabel(
+                  digital ? "digital" : form.shipping_method,
+                )}
+                )
+              </span>
               <span className="price">{formatToman(shippingFee)}</span>
             </div>
             <div className="checkout-summary__row checkout-summary__row--total">
@@ -519,10 +591,11 @@ export default function CheckoutPage() {
             </div>
           </div>
           <p className="page-subtitle">
-            جمع نهایی هنگام ثبت سفارش توسط سرور محاسبه می‌شود. پس از ثبت سفارش، به درگاه پرداخت زرین‌پال منتقل خواهید شد.
+            جمع نهایی هنگام ثبت سفارش توسط سرور محاسبه می‌شود. پس از ثبت سفارش،
+            به درگاه پرداخت زرین‌پال منتقل خواهید شد.
           </p>
         </div>
       </div>
     </main>
-  )
+  );
 }

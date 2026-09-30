@@ -244,7 +244,7 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (Article, error
 		       c.id, c.name, c.slug
 		FROM articles a
 		LEFT JOIN article_categories c ON a.category_id = c.id
-		WHERE a.slug = $1 AND a.status = 'published'
+		WHERE (a.slug=$1 OR (a.id IN(SELECT article_id FROM article_slug_aliases WHERE slug=$1) AND NOT EXISTS(SELECT 1 FROM articles WHERE slug=$1))) AND a.status='published'
 	`
 	err := r.db.QueryRow(ctx, query, slug).Scan(
 		&a.ID, &a.Title, &a.Slug, &a.Excerpt, &a.Content, &a.CoverImageURL,
@@ -334,6 +334,15 @@ func (r *Repository) Update(ctx context.Context, id int64, input UpdateArticleIn
 		categoryID = input.CategoryID
 	}
 
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Article{}, err
+	}
+	defer tx.Rollback(ctx)
+	var oldSlug string
+	if err = tx.QueryRow(ctx, "SELECT slug FROM articles WHERE id=$1 FOR UPDATE", id).Scan(&oldSlug); err != nil {
+		return Article{}, err
+	}
 	var a Article
 	query := `
 		UPDATE articles
@@ -343,7 +352,7 @@ func (r *Repository) Update(ctx context.Context, id int64, input UpdateArticleIn
 		    updated_at = NOW()
 		WHERE id = $12
 		RETURNING ` + articleColumns
-	err := r.db.QueryRow(ctx, query,
+	err = tx.QueryRow(ctx, query,
 		input.Title, input.Slug, input.Excerpt, input.Content, input.CoverImageURL,
 		categoryID, *input.Status, input.PublishedAt, input.SeoTitle, input.SeoDescription,
 		input.ClearCategory, id,
@@ -365,6 +374,14 @@ func (r *Repository) Update(ctx context.Context, id int64, input UpdateArticleIn
 				return Article{}, ErrCategoryNotFound
 			}
 		}
+		return Article{}, err
+	}
+	if oldSlug != a.Slug {
+		if _, err = tx.Exec(ctx, "INSERT INTO article_slug_aliases(slug,article_id) VALUES($1,$2) ON CONFLICT DO NOTHING", oldSlug, id); err != nil {
+			return Article{}, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return Article{}, err
 	}
 	return a, nil

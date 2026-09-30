@@ -13,8 +13,30 @@ export class ApiError extends Error {
 }
 
 export async function readErrorMessage(response: Response): Promise<string> {
-  const text = await response.text()
-  return text.trim() || `Request failed with status ${response.status}`
+  const text = (await response.text()).trim()
+  const messages: Record<string, string> = {
+    'invalid credentials': 'ایمیل یا رمز عبور درست نیست.',
+    unauthorized: 'برای ادامه وارد حساب شوید.',
+    forbidden: 'اجازه انجام این کار را ندارید.',
+    'insufficient stock': 'موجودی محصول کافی نیست.',
+    'only verified buyers can review':
+      'ثبت نظر برای خریدارانی فعال است که سفارش پرداخت‌شده را تحویل گرفته‌اند.',
+    'password recovery is unavailable; contact support':
+      'بازیابی رمز فعلاً فعال نیست. با پشتیبانی تماس بگیرید.',
+    'password reset link is invalid or expired':
+      'لینک بازیابی معتبر نیست یا منقضی شده است.',
+  }
+  if (messages[text]) return messages[text]
+  if (/[\u0600-\u06ff]/.test(text)) return text
+  if (response.status === 429)
+    return 'درخواست‌ها زیاد است. کمی بعد دوباره تلاش کنید.'
+  if (response.status >= 500)
+    return 'سرویس موقتاً در دسترس نیست. دوباره تلاش کنید.'
+  if (response.status === 413) return 'حجم فایل بیش از حد مجاز است.'
+  if (response.status === 404) return 'اطلاعات موردنظر پیدا نشد.'
+  if (response.status === 409)
+    return 'اطلاعات تغییر کرده است. صفحه را تازه کنید.'
+  return 'اطلاعات واردشده را بررسی کنید و دوباره تلاش کنید.'
 }
 
 export async function throwApiError(response: Response): Promise<never> {

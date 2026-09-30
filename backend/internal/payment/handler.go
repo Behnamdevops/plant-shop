@@ -125,6 +125,7 @@ func (h *Handler) RequestZarinPal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if out.Code != codeSuccess || len(out.Authority) > 64 || !validAuthority(out.Authority) || out.RedirectURL == "" {
+		_ = h.repository.MarkAttemptFailed(persistCtx, attempt.ID, nil)
 		http.Error(w, "invalid payment provider response", http.StatusServiceUnavailable)
 		return
 	}
@@ -204,7 +205,7 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := verifyOut.Code
-	result, err := h.repository.FinalizeVerifiedPayment(r.Context(), authority, verifyOut.RefID, code)
+	result, err := h.repository.FinalizeVerifiedPayment(persistCtx, authority, verifyOut.RefID, code)
 	if err != nil {
 		log.Printf("payment: failed to finalize verified payment: %v", err)
 		h.redirectResult(w, r, attempt.OrderID, "unknown")

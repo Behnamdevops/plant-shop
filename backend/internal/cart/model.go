@@ -17,6 +17,7 @@ type Item struct {
 
 // ItemView is a cart item enriched with product data for the GET /cart response.
 type ItemView struct {
+	Kind      string `json:"kind"`
 	ID        int64  `json:"id"`
 	ProductID int64  `json:"product_id"`
 	Name      string `json:"name"`

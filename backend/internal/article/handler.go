@@ -71,6 +71,14 @@ func (h *Handler) cleanupImageIfUnused(ctx context.Context, oldURL, newURL *stri
 	if !ok {
 		return
 	}
+	if h.db == nil {
+		return
+	}
+	var used bool
+	err := h.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE image_url=$1 OR image_urls ? $1) OR EXISTS(SELECT 1 FROM articles WHERE cover_image_url=$1 OR position($1 in content)>0)`, *oldURL).Scan(&used)
+	if err != nil || used {
+		return
+	}
 	if err := h.images.Delete(ctx, key); err != nil {
 		slog.Warn("failed to clean up old article image", "error", err.Error())
 	}

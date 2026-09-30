@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -15,7 +16,10 @@ import (
 )
 
 type Handler struct {
-	repository *Repository
+	notifier     recoveryNotifier
+	resetBase    string
+	resetEnabled bool
+	repository   *Repository
 
 	// SecureCookies controls the Secure attribute on the session cookie.
 	// It defaults to false so local HTTP development keeps working without
@@ -37,6 +41,15 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	password := input.Password
 	if name == "" || email == "" || password == "" {
 		http.Error(w, "name, email, and password are required", http.StatusBadRequest)
+		return
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email || len(email) > 254 {
+		http.Error(w, "invalid email", 400)
+		return
+	}
+	if len(name) > 255 || len(password) > 72 {
+		http.Error(w, "invalid account input", 400)
 		return
 	}
 	if len(password) < 8 {

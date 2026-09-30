@@ -96,18 +96,24 @@ func (r *Repository) Enqueue(ctx context.Context, eventKey string, userID int64,
 // GetPendingDue returns pending notifications that are due for processing.
 // Uses SELECT ... FOR UPDATE SKIP LOCKED for concurrency safety.
 func (r *Repository) GetPendingDue(ctx context.Context) ([]NotificationOutbox, error) {
+	return r.GetPendingDueLimit(ctx, 50)
+}
+func (r *Repository) GetPendingDueLimit(ctx context.Context, limit int) ([]NotificationOutbox, error) {
+	if limit < 1 || limit > 10 {
+		limit = 10
+	}
 	rows, err := r.db.Query(ctx, `
 		UPDATE notification_outbox
 		SET status = 'processing', updated_at = NOW()
 		WHERE id IN (
 			SELECT id FROM notification_outbox
-			WHERE status = 'pending' AND next_attempt_at <= NOW()
+			WHERE (status = 'pending' AND next_attempt_at <= NOW()) OR (status='processing' AND updated_at<NOW()-INTERVAL '10 minutes')
 			ORDER BY next_attempt_at ASC
-			LIMIT 50
+			LIMIT $1
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, event_key, user_id, recipient_email, event_type, payload, status, attempts, next_attempt_at, last_error, sent_at, created_at, updated_at
-	`)
+	`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +194,7 @@ func (r *Repository) MarkPermanentFailure(ctx context.Context, id int64, lastErr
 	result, err := r.db.Exec(ctx, `
 		UPDATE notification_outbox
 		SET status = 'failed', last_error = $1, updated_at = NOW()
-		WHERE id = $2 AND status = 'pending'
+		WHERE id = $2 AND status IN ('pending','processing')
 	`, lastError, id)
 	if err != nil {
 		return err
@@ -279,4 +285,35 @@ func (r *Repository) GetByEventKey(ctx context.Context, eventKey string) (*Notif
 	}
 
 	return &n, nil
+}
+
+// List returns a bounded page, releasing the cursor before fetching details.
+func (r *Repository) List(ctx context.Context, limit, before int64) ([]NotificationOutbox, error) {
+	rows, err := r.db.Query(ctx, "SELECT id FROM notification_outbox WHERE ($1::bigint=0 OR id<$1) ORDER BY id DESC LIMIT $2", before, limit)
+	if err != nil {
+		return nil, err
+	}
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	result := []NotificationOutbox{}
+	for _, id := range ids {
+		n, err := r.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *n)
+	}
+	return result, nil
 }

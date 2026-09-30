@@ -29,7 +29,7 @@ const productColumns = `
 	image_url,
 	category_id,
 	created_at,
-	updated_at
+	updated_at, details, image_urls, COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.product_id=products.id AND o.payment_status='paid' AND o.status!='cancelled'),0)
 `
 
 func scanProduct(row pgx.Row, p *Product) error {
@@ -43,7 +43,7 @@ func scanProduct(row pgx.Row, p *Product) error {
 		&p.ImageURL,
 		&p.CategoryID,
 		&p.CreatedAt,
-		&p.UpdatedAt,
+		&p.UpdatedAt, &p.Details, &p.ImageURLs, &p.SoldQuantity,
 	)
 }
 
@@ -85,6 +85,11 @@ func (r *Repository) List(ctx context.Context, filters ListFilters) (ListResult,
 		where = append(where, fmt.Sprintf("price <= %s", arg(*filters.MaxPrice)))
 	}
 
+	for _, f := range []struct{ key, value string }{{"kind", filters.Kind}, {"brand", filters.Brand}, {"formulation", filters.Formulation}, {"article_slug", filters.Guide}} {
+		if f.value != "" {
+			where = append(where, fmt.Sprintf("details->>'%s' = %s", f.key, arg(f.value)))
+		}
+	}
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = "WHERE " + strings.Join(where, " AND ")
@@ -148,7 +153,7 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (Product, error
 	err := scanProduct(r.db.QueryRow(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM products
-		WHERE slug = $1
+		WHERE slug = $1 OR (id IN(SELECT product_id FROM product_slug_aliases WHERE slug=$1) AND NOT EXISTS(SELECT 1 FROM products WHERE slug=$1))
 	`, productColumns), slug), &p)
 	return p, err
 }
@@ -166,10 +171,10 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (Product, error) {
 func (r *Repository) Create(ctx context.Context, input CreateProductInput) (Product, error) {
 	var p Product
 	err := scanProduct(r.db.QueryRow(ctx, fmt.Sprintf(`
-		INSERT INTO products (name, slug, description, price, stock, image_url, category_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO products (name, slug, description, price, stock, image_url, category_id,details,image_urls)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9)
 		RETURNING %s
-	`, productColumns), input.Name, input.Slug, input.Description, input.Price, input.Stock, input.ImageURL, input.CategoryID), &p)
+	`, productColumns), input.Name, input.Slug, input.Description, input.Price, input.Stock, input.ImageURL, input.CategoryID, input.Details, normalizedImages(input.ImageURLs)), &p)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -212,17 +217,27 @@ func (r *Repository) Update(ctx context.Context, id int64, input UpdateProductIn
 		categoryID = input.CategoryID
 	}
 
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Product{}, err
+	}
+	defer tx.Rollback(ctx)
+	var oldStock int
+	var oldSlug string
+	if err = tx.QueryRow(ctx, "SELECT stock,slug FROM products WHERE id=$1 FOR UPDATE", id).Scan(&oldStock, &oldSlug); err != nil {
+		return Product{}, err
+	}
 	var p Product
-	err := scanProduct(r.db.QueryRow(ctx, fmt.Sprintf(`
+	err = scanProduct(tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE products
 		SET name = $1, slug = $2, description = $3, price = $4, stock = $5, image_url = $6,
 			category_id = CASE WHEN $8 THEN NULL ELSE COALESCE($7, category_id) END,
-			updated_at = NOW()
+			details=COALESCE($10,details),image_urls=COALESCE($11,image_urls),updated_at = NOW()
 		WHERE id = $9
 		RETURNING %s
 	`, productColumns),
 		*input.Name, *input.Slug, *input.Description, *input.Price, *input.Stock, input.ImageURL,
-		categoryID, input.ClearCategory, id,
+		categoryID, input.ClearCategory, id, input.Details, input.ImageURLs,
 	), &p)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -239,5 +254,55 @@ func (r *Repository) Update(ctx context.Context, id int64, input UpdateProductIn
 		}
 		return Product{}, err
 	}
+	if oldStock != *input.Stock {
+		reason := strings.TrimSpace(input.StockReason)
+		if reason == "" {
+			reason = "ویرایش موجودی از فرم محصول"
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO inventory_adjustments(product_id,admin_user_id,delta,stock_before,stock_after,reason) VALUES($1,$2,$3,$4,$5,$6)", id, input.AdminUserID, *input.Stock-oldStock, oldStock, *input.Stock, reason); err != nil {
+			return Product{}, err
+		}
+	}
+	if oldSlug != p.Slug {
+		if _, err = tx.Exec(ctx, "INSERT INTO product_slug_aliases(slug,product_id) VALUES($1,$2) ON CONFLICT(slug) DO NOTHING", oldSlug, id); err != nil {
+			return Product{}, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return Product{}, err
+	}
 	return p, nil
+}
+
+func normalizedImages(images []string) []string {
+	if images == nil {
+		return []string{}
+	}
+	return images
+}
+func (r *Repository) ImageReferenced(ctx context.Context, url string) (bool, error) {
+	var used bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE image_url=$1 OR image_urls ? $1) OR EXISTS(SELECT 1 FROM articles WHERE cover_image_url=$1 OR position($1 in content)>0)`, url).Scan(&used)
+	return used, err
+}
+
+func (r *Repository) Related(ctx context.Context, p Product) ([]Product, error) {
+	ids := p.Details.RelatedIDs
+	if ids == nil {
+		ids = []int64{}
+	}
+	rows, err := r.db.Query(ctx, "SELECT "+productColumns+" FROM products WHERE id!=$1 AND stock>0 AND (id=ANY($2) OR (cardinality($2::bigint[])=0 AND category_id=$3)) ORDER BY array_position($2::bigint[],id) NULLS LAST,id DESC LIMIT 8", p.ID, ids, p.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Product{}
+	for rows.Next() {
+		var item Product
+		if err = scanProduct(rows, &item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

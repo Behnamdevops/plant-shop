@@ -1,111 +1,77 @@
-import { Link } from 'react-router-dom'
-import { storeConfig } from '../config'
-
+import { Link } from "react-router-dom";
+import { storeConfig } from "../config";
+import Icon from "./Icon";
 export default function Footer() {
-  const currentYear = new Date().getFullYear()
-
   return (
     <footer className="site-footer">
       <div className="site-footer__container">
-        {/* Brand & Social */}
         <div className="site-footer__brand">
-          <Link to="/" className="site-footer__brand-link">
-            <span className="site-footer__brand-icon" aria-hidden="true">
-              🌿
-            </span>
-            <span className="site-footer__brand-name">{storeConfig.name}</span>
+          <Link className="site-footer__brand-link" to="/">
+            <Icon name="leaf" size={32} />
+            {storeConfig.name}
           </Link>
-          <p className="site-footer__brand-desc">
-            دنیای سبز گیاهان برای زندگی سالم‌تر
+          <p>
+            محصول و آموزش برای مراقبت بهتر از گیاه.
+            <br />
+            با شناخت بیشتر انتخاب کنید و بهتر مراقبت کنید.
           </p>
+          <Link className="footer-contact" to="/contact">
+            ارتباط با فروشگاه <Icon name="arrow" size={17} />
+          </Link>
         </div>
-
-        {/* Links */}
         <div className="site-footer__links">
-          {/* Shop */}
-          <div className="site-footer__column">
-            <h3 className="site-footer__column-title">فروشگاه</h3>
-            <ul className="site-footer__column-list">
-              <li>
-                <Link to="/shop">همه محصولات</Link>
-              </li>
-              <li>
-                <Link to="/shop?category=1">گیاهات اطراف خانه</Link>
-              </li>
-              <li>
-                <Link to="/shop?category=2">گیاهات داخل خانه</Link>
-              </li>
-              <li>
-                <Link to="/shop?category=3">گل‌ها</Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Education */}
-          <div className="site-footer__column">
-            <h3 className="site-footer__column-title">آموزش و محتوا</h3>
-            <ul className="site-footer__column-list">
-              <li>
-                <Link to="/articles">مقالات و آموزش‌ها</Link>
-              </li>
-              <li>
-                <Link to="/shipping">ارسال و حمل</Link>
-              </li>
-              <li>
-                <Link to="/faq">سوالات متداول</Link>
-              </li>
-              <li>
-                <Link to="/about">درباره ما</Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Customer Help */}
-          <div className="site-footer__column">
-            <h3 className="site-footer__column-title">کمک و پشتیبانی</h3>
-            <ul className="site-footer__column-list">
-              <li>
-                <Link to="/contact">تماس با ما</Link>
-              </li>
-              <li>
-                <Link to="/returns">سیاست بازگرداندن</Link>
-              </li>
-              <li>
-                <Link to="/privacy">حریم خصوصی</Link>
-              </li>
-              <li>
-                <Link to="/terms">شرایط و قوانین</Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Legal */}
-          <div className="site-footer__column">
-            <h3 className="site-footer__column-title">قوانین</h3>
-            <ul className="site-footer__column-list">
-              <li>
-                <Link to="/privacy">حریم خصوصی</Link>
-              </li>
-              <li>
-                <Link to="/terms">شرایط و قوانین</Link>
-              </li>
-              <li>
-                <Link to="/returns">سیاست بازگرداندن</Link>
-              </li>
-            </ul>
-          </div>
+          {[
+            {
+              title: "فروشگاه",
+              links: [
+                ["/shop", "همهٔ محصولات"],
+                ["/category/fertilizers", "کود و تقویت‌کننده‌ها"],
+                ["/category/substrates", "خاک و بستر کشت"],
+                ["/wishlist", "علاقه‌مندی‌ها"],
+              ],
+            },
+            {
+              title: "حساب و سفارش",
+              links: [
+                ["/account", "حساب کاربری"],
+                ["/orders", "پیگیری سفارش"],
+                ["/shipping", "روش و هزینهٔ ارسال"],
+                ["/returns", "درخواست مرجوعی"],
+              ],
+            },
+            {
+              title: "دنیای گیاهان",
+              links: [
+                ["/blog", "آموزش و راهنما"],
+                ["/about", "دربارهٔ ما"],
+                ["/faq", "پرسش‌های متداول"],
+                ["/contact", "تماس با ما"],
+              ],
+            },
+          ].map((group) => (
+            <div className="site-footer__column" key={group.title}>
+              <h3>{group.title}</h3>
+              <ul>
+                {group.links.map(([to, label]) => (
+                  <li key={to}>
+                    <Link to={to}>{label}</Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       </div>
-
-      {/* Bottom */}
       <div className="site-footer__bottom">
-        <p className="site-footer__copyright">
-          © {currentYear} {storeConfig.name}. تمامی حقوق محفوظ است.
+        <p>
+          © {new Date().getFullYear()} {storeConfig.name} · تمامی حقوق محفوظ
+          است.
         </p>
-        <p className="site-footer__credits">
-          طراحی شده برای دنیای سبز
-        </p>
+        <div>
+          <Link to="/privacy">حریم خصوصی</Link>
+          <Link to="/terms">شرایط استفاده</Link>
+        </div>
       </div>
     </footer>
-  )
+  );
 }

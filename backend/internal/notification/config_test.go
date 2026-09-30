@@ -105,6 +105,9 @@ func TestLoadConfigMissingRequired(t *testing.T) {
 				if key == "SMTP_HOST" {
 					return ""
 				}
+				if key == "SMTP_PORT" {
+					return "587"
+				}
 				return "placeholder"
 			},
 			expected: "SMTP_HOST is required when EMAIL_ENABLED=true",
@@ -117,6 +120,9 @@ func TestLoadConfigMissingRequired(t *testing.T) {
 				}
 				if key == "SMTP_USERNAME" {
 					return ""
+				}
+				if key == "SMTP_PORT" {
+					return "587"
 				}
 				return "placeholder"
 			},
@@ -131,6 +137,9 @@ func TestLoadConfigMissingRequired(t *testing.T) {
 				if key == "SMTP_PASSWORD" {
 					return ""
 				}
+				if key == "SMTP_PORT" {
+					return "587"
+				}
 				return "placeholder"
 			},
 			expected: "SMTP_PASSWORD is required when EMAIL_ENABLED=true",
@@ -143,6 +152,9 @@ func TestLoadConfigMissingRequired(t *testing.T) {
 				}
 				if key == "SMTP_FROM_EMAIL" {
 					return ""
+				}
+				if key == "SMTP_PORT" {
+					return "587"
 				}
 				return "placeholder"
 			},

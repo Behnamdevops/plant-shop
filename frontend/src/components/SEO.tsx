@@ -19,8 +19,8 @@ interface SEOProps {
   twitterImage?: string
 }
 
-const DEFAULT_OG_IMAGE = '/placeholder-og.jpg'
-const CANONICAL_ORIGIN = 'https://giiaco.ir'
+const DEFAULT_OG_IMAGE = '/og-default.png'
+const CANONICAL_ORIGIN = storeConfig.publicOrigin
 
 export default function SEO({
   title,
@@ -35,7 +35,7 @@ export default function SEO({
   twitterCard = 'summary_large_image',
   twitterTitle,
   twitterDescription,
-  twitterImage
+  twitterImage,
 }: SEOProps) {
   function setOgTag(property: string, content: string) {
     let meta = document.querySelector(`meta[property="${property}"]`)
@@ -76,7 +76,10 @@ export default function SEO({
       linkMeta.setAttribute('rel', 'canonical')
       document.head.appendChild(linkMeta)
     }
-    linkMeta.setAttribute('href', canonical ? `${CANONICAL_ORIGIN}${canonical}` : CANONICAL_ORIGIN)
+    linkMeta.setAttribute(
+      'href',
+      new URL(canonical || window.location.pathname, CANONICAL_ORIGIN).href,
+    )
 
     // Robots meta
     let robotsMeta = document.querySelector('meta[name="robots"]')
@@ -85,21 +88,38 @@ export default function SEO({
       robotsMeta.setAttribute('name', 'robots')
       document.head.appendChild(robotsMeta)
     }
-    robotsMeta.setAttribute('content', noindex ? 'noindex, nofollow' : 'index, follow')
+    robotsMeta.setAttribute(
+      'content',
+      noindex ? 'noindex, nofollow' : 'index, follow',
+    )
 
     // Open Graph tags - use absolute URLs
     setOgTag('og:title', ogTitle || title)
     setOgTag('og:description', ogDescription || description || title)
     setOgTag('og:type', ogType)
-    setOgTag('og:url', ogUrl || (canonical ? `${CANONICAL_ORIGIN}${canonical}` : CANONICAL_ORIGIN))
-    setOgTag('og:image', ogImage || DEFAULT_OG_IMAGE)
+    setOgTag(
+      'og:url',
+      ogUrl ||
+        new URL(canonical || window.location.pathname, CANONICAL_ORIGIN).href,
+    )
+    setOgTag(
+      'og:image',
+      new URL(ogImage || DEFAULT_OG_IMAGE, CANONICAL_ORIGIN).href,
+    )
     setOgTag('og:site_name', storeConfig.name)
 
     // Twitter Card tags
     setTwitterTag('twitter:card', twitterCard)
     setTwitterTag('twitter:title', twitterTitle || title)
-    setTwitterTag('twitter:description', twitterDescription || description || title)
-    setTwitterTag('twitter:image', twitterImage || DEFAULT_OG_IMAGE)
+    setTwitterTag(
+      'twitter:description',
+      twitterDescription || description || title,
+    )
+    setTwitterTag(
+      'twitter:image',
+      new URL(twitterImage || ogImage || DEFAULT_OG_IMAGE, CANONICAL_ORIGIN)
+        .href,
+    )
   }, [
     title,
     description,
@@ -113,7 +133,7 @@ export default function SEO({
     twitterCard,
     twitterTitle,
     twitterDescription,
-    twitterImage
+    twitterImage,
   ])
 
   return null

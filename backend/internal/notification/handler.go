@@ -53,9 +53,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TODO: Implement List method in Repository for pagination
-	// For now, return empty array
-	notifications := []NotificationOutbox{}
+	notifications, err := h.repo.List(r.Context(), limit, beforeID)
+	if err != nil {
+		http.Error(w, "internal server error", 500)
+		return
+	}
+	for i := range notifications {
+		redactRecovery(&notifications[i])
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(notifications)
 }
@@ -84,6 +89,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	redactRecovery(n)
 	json.NewEncoder(w).Encode(n)
 }
 
@@ -93,8 +99,17 @@ func (h *Handler) Count(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Implement CountPending in Repository
-	count := 0
+	var count int
+	if err := h.repo.db.QueryRow(r.Context(), "SELECT count(*) FROM notification_outbox WHERE status IN ('pending','processing')").Scan(&count); err != nil {
+		http.Error(w, "internal server error", 500)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{"pending": count})
+}
+
+func redactRecovery(n *NotificationOutbox) {
+	if n.EventType == "password_reset" {
+		n.Payload = Payload{"reset_url": "[redacted]"}
+	}
 }

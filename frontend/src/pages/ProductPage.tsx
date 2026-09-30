@@ -1,199 +1,277 @@
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { getProduct } from '../api/products'
-import { addCartItem } from '../api/cart'
-import type { Product } from '../types/product'
-import { useAuth } from '../hooks/useAuth'
-import { formatToman } from '../lib/format'
-import ProductImage from '../components/ProductImage'
-import SEO from '../components/SEO'
-import { storeConfig } from '../config'
-
-type ProductDetailsProps = {
-  slug: string
-}
-
-function ProductDetails({ slug }: ProductDetailsProps) {
-  const { user, loading: authLoading } = useAuth()
-  const [product, setProduct] = useState<Product | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [cartMessage, setCartMessage] = useState('')
-  const [cartError, setCartError] = useState('')
-  const [addingToCart, setAddingToCart] = useState(false)
-
-  const handleAddToCart = async () => {
-    if (!product) return
-
-    setCartError('')
-    setCartMessage('')
-    setAddingToCart(true)
-
-    try {
-      await addCartItem(product.id, 1)
-      setCartMessage('به سبد خرید اضافه شد')
-    } catch (err) {
-      setCartError(err instanceof Error ? err.message : 'مشکلی در افزودن به سبد خرید پیش آمد')
-    } finally {
-      setAddingToCart(false)
-    }
-  }
-
+import { usePublicData } from "../context/PublicDataContext";
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { getProduct, getRelatedProducts } from "../api/products";
+import { addCartItem } from "../api/cart";
+import type { Product } from "../types/product";
+import { useAuth } from "../hooks/useAuth";
+import { formatToman } from "../lib/format";
+import { storeConfig } from "../config";
+import ProductImage from "../components/ProductImage";
+import ProductCard from "../components/ProductCard";
+import WishlistButton from "../components/WishlistButton";
+import ProductReviews from "../components/ProductReviews";
+import { kindLabel } from "../catalog";
+import SEO from "../components/SEO";
+function ProductDetails({ slug }: { slug: string }) {
+  const bootstrap = usePublicData();
+  const { loading: authLoading } = useAuth();
+  const [product, setProduct] = useState<Product | null>(
+      bootstrap?.product || null,
+    ),
+    [loading, setLoading] = useState(!bootstrap),
+    [error, setError] = useState(""),
+    [quantity, setQuantity] = useState(1),
+    [selected, setSelected] = useState<string | null>(null),
+    [related, setRelated] = useState<Product[]>(
+      bootstrap?.relatedProducts || [],
+    ),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
   useEffect(() => {
-    let ignore = false
-
+    let active = true;
     getProduct(slug)
-      .then((data) => {
-        if (!ignore) {
-          setProduct(data)
-        }
+      .then((value) => {
+        if (active) setProduct(value);
       })
       .catch(() => {
-        if (!ignore) {
-          setError('مشکلی در بارگذاری محصول پیش آمد')
-        }
+        if (active) setError("محصول یافت نشد یا دریافت اطلاعات انجام نشد.");
       })
       .finally(() => {
-        if (!ignore) {
-          setLoading(false)
-        }
-      })
-
+        if (active) setLoading(false);
+      });
     return () => {
-      ignore = true
-    }
-  }, [slug])
-
-  if (loading) {
+      active = false;
+    };
+  }, [slug]);
+  useEffect(() => {
+    if (!product?.slug) return;
+    let active = true;
+    getRelatedProducts(product.slug)
+      .then((value) => {
+        if (active) setRelated(value);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [product?.id, product?.slug]);
+  if (loading)
     return (
       <main>
-        <p className="state-message">در حال بارگذاری محصول...</p>
+        <p>در حال بارگذاری محصول...</p>
       </main>
-    )
-  }
-
-  if (error || !product) {
+    );
+  if (!product)
     return (
       <main>
-        <p className="alert alert-error" role="alert">
-          {error || 'محصول یافت نشد'}
-        </p>
-        <Link to="/" className="back-link">
-          → بازگشت به محصولات
-        </Link>
+        <SEO title="محصول یافت نشد" noindex />
+        <h1>محصول یافت نشد</h1>
+        <p>{error}</p>
+        <Link to="/shop">بازگشت به فروشگاه</Link>
       </main>
-    )
-  }
-
-  const structuredData = {
-    '@context': 'https://schema.org',
-    '@type': 'Product',
+    );
+  const details = product.details || {};
+  const expired =
+    !!details.expiry_date &&
+    details.expiry_date < new Date().toISOString().slice(0, 10);
+  const images = [
+    ...new Set(
+      [product.image_url, ...(product.image_urls || [])].filter(
+        (x): x is string => !!x,
+      ),
+    ),
+  ];
+  const specs = [
+    ["نوع محصول", kindLabel(details.kind)],
+    ["برند", details.brand],
+    ["وزن / حجم", details.weight_volume],
+    ["نوع مصرف", details.formulation],
+    ["مناسب برای", details.suitable_for],
+    [
+      "تعداد در بسته",
+      details.pack_count ? String(details.pack_count) : undefined,
+    ],
+    ["کشور سازنده", details.country],
+    ["تاریخ انقضا", details.expiry_date],
+    ["اقلام داخل بسته", details.included],
+  ];
+  const structured = {
+    "@context": "https://schema.org",
+    "@type": "Product",
     name: product.name,
     description: product.description,
-    image: product.image_url || undefined,
+    image: images,
+    sku: String(product.id),
+    ...(details.brand
+      ? { brand: { "@type": "Brand", name: details.brand } }
+      : {}),
+    additionalProperty: specs
+      .filter(([, v]) => v)
+      .map(([name, value]) => ({ "@type": "PropertyValue", name, value })),
     offers: {
-      '@type': 'Offer',
-      url: window.location.href,
+      "@type": "Offer",
+      url:
+        (bootstrap?.origin || storeConfig.publicOrigin) +
+        "/products/" +
+        product.slug,
       price: product.price,
-      priceCurrency: 'IRR',
-      availability: product.stock <= 0
-        ? 'https://schema.org/OutOfStock'
-        : product.stock <= 5
-          ? 'https://schema.org/LimitedAvailability'
-          : 'https://schema.org/InStock'
-    }
-  }
-
+      priceCurrency: "IRR",
+      availability:
+        product.stock > 0 && !expired
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+    },
+  };
   return (
-    <>
+    <main>
       <SEO
         title={product.name}
-        description={product.description || `خرید ${product.name} از ${storeConfig.name}`}
+        description={product.description}
         canonical={`/products/${product.slug}`}
+        ogImage={product.image_url || undefined}
       />
       <script type="application/ld+json">
-        {JSON.stringify(structuredData)}
+        {JSON.stringify(structured).replace(/</g, "\\u003c")}
       </script>
-      <main>
-        <Link to="/" className="back-link">
-          → بازگشت
-        </Link>
-
-        <div className="product-detail">
-          <div className="product-detail__media">
-            <ProductImage
-              src={product.image_url}
-              alt={product.name}
-              placeholderClassName="product-detail__media-placeholder"
-            />
-          </div>
-
-          <div className="product-detail__info">
-            <h1>{product.name}</h1>
-
-            <div className="product-detail__price-row">
-              <span className="price">{formatToman(product.price)}</span>
-              {product.stock <= 0 ? (
-                <span className="badge badge-out-of-stock">ناموجود</span>
-              ) : product.stock <= 5 ? (
-                <span className="badge badge-limited-stock">تعداد محدود ({product.stock} عدد)</span>
-              ) : (
-                <span className="badge badge-in-stock">موجود ({product.stock} عدد)</span>
-              )}
+      <Link className="back-link" to="/shop">
+        بازگشت به فروشگاه
+      </Link>
+      <div className="product-detail">
+        <div className="product-detail__media">
+          <ProductImage
+            priority
+            src={selected || product.image_url}
+            alt={product.name}
+            placeholderClassName="product-detail__media-placeholder"
+          />
+          {images.length > 1 && (
+            <div className="gallery-thumbs">
+              {images.map((src) => (
+                <button
+                  key={src}
+                  type="button"
+                  aria-label="نمایش تصویر محصول"
+                  aria-pressed={(selected || product.image_url) === src}
+                  onClick={() => setSelected(src)}
+                >
+                  <ProductImage src={src} alt={product.name} />
+                </button>
+              ))}
             </div>
-
-            <p className="product-detail__description">{product.description}</p>
-
-            {!authLoading && (
-              user ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={handleAddToCart}
-                    disabled={product.stock <= 0 || addingToCart}
-                  >
-                    {product.stock <= 0
-                      ? 'ناموجود'
-                      : addingToCart
-                        ? 'در حال افزودن...'
-                        : 'افزودن به سبد خرید'}
-                  </button>
-                  {cartMessage && (
-                    <p className="alert alert-success" role="status">
-                      {cartMessage}
-                    </p>
-                  )}
-                  {cartError && (
-                    <p className="alert alert-error" role="alert">
-                      {cartError}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p>
-                  برای افزودن این محصول به سبد خرید، <Link to="/login">وارد شوید</Link>.
-                </p>
-              )
-            )}
-          </div>
+          )}
         </div>
-      </main>
-    </>
-  )
+        <div className="product-detail__info">
+          <h1>{product.name}</h1>
+          <p className="price">{formatToman(product.price)}</p>
+          <p>
+            {expired
+              ? "تاریخ مصرف این محصول گذشته است"
+              : product.stock > 0
+                ? "موجود"
+                : "ناموجود"}
+          </p>
+          <p className="product-detail__description">{product.description}</p>
+          <dl className="care-specs">
+            {specs
+              .filter(([, v]) => v)
+              .map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+          </dl>
+          {details.article_slug && (
+            <p>
+              <Link to={`/blog/${encodeURIComponent(details.article_slug)}`}>
+                راهنمای انتخاب و مصرف این محصول
+              </Link>
+            </p>
+          )}
+          {(
+            [
+              ["composition", "ترکیبات"],
+              ["benefits", "ویژگی‌ها و مزایا"],
+              ["usage", "روش مصرف"],
+              ["warnings", "هشدار مصرف"],
+              ["delivery_info", "روش ارائهٔ آموزش و مشاوره"],
+            ] as const
+          )
+            .filter(([key]) => details[key])
+            .map(([key, label]) => (
+              <section
+                className={`product-text product-text--${key}`}
+                key={key}
+              >
+                <h2>{label}</h2>
+                <p>{details[key]}</p>
+              </section>
+            ))}
+          <p>
+            <Link to="/shipping">روش و هزینه ارسال</Link> ·{" "}
+            <Link to="/returns">رسیدگی به آسیب هنگام حمل</Link>
+          </p>
+          <label>
+            تعداد{" "}
+            <input
+              type="number"
+              aria-label="تعداد محصول"
+              min={1}
+              max={product.stock}
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+            />
+          </label>
+          <button
+            className="btn btn-primary"
+            disabled={busy || authLoading || product.stock < 1 || expired}
+            onClick={async () => {
+              setBusy(true);
+              setMessage("");
+              setError("");
+              try {
+                await addCartItem(product.id, quantity, product);
+                setMessage("به سبد خرید اضافه شد");
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "افزودن انجام نشد.",
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "در حال افزودن..." : "افزودن به سبد خرید"}
+          </button>{" "}
+          <WishlistButton product={product} />
+          {message && (
+            <p role="status">
+              {message} <Link to="/cart">مشاهده سبد خرید</Link>
+            </p>
+          )}
+          {error && <p role="alert">{error}</p>}
+        </div>
+      </div>
+      {related.length > 0 && (
+        <section>
+          <h2>محصولات مرتبط و مکمل</h2>
+          <div className="product-grid">
+            {related.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </section>
+      )}
+      <ProductReviews productID={product.id} />
+    </main>
+  );
 }
-
 export default function ProductPage() {
-  const { slug } = useParams<{ slug: string }>()
-
-  if (!slug) {
-    return (
-      <main>
-        <p>محصول نامعتبر</p>
-        <Link to="/">بازگشت به محصولات</Link>
-      </main>
-    )
-  }
-
-  return <ProductDetails key={slug} slug={slug} />
+  const { slug } = useParams();
+  return slug ? (
+    <ProductDetails key={slug} slug={slug} />
+  ) : (
+    <p>محصول یافت نشد</p>
+  );
 }

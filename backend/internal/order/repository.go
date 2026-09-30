@@ -12,13 +12,14 @@ import (
 )
 
 type Repository struct {
+	shipping      ShippingConfig
 	db            *pgxpool.Pool
 	coupons       *coupon.Repository
 	notifications *notification.Repository
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db, coupons: coupon.NewRepository(db)}
+	return &Repository{db: db, coupons: coupon.NewRepository(db), shipping: ShippingConfig{Standard: ShippingFeeStandard, Express: ShippingFeeExpress, Configured: true}}
 }
 
 // WithNotifications sets the notification repository for the order repository.
@@ -61,6 +62,8 @@ func (r *Repository) getOrderByID(ctx context.Context, orderID int64) (Order, st
 // cartLine is a cart item joined with its current product data, used only
 // during checkout.
 type cartLine struct {
+	Kind        string
+	Expired     bool
 	ProductID   int64
 	ProductName string
 	ProductSlug string
@@ -77,7 +80,7 @@ type cartLine struct {
 // cart. Nothing is persisted unless every step succeeds. The caller must
 // have already validated input (e.g. via CheckoutInput.Validate).
 func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input CheckoutInput) (Order, error) {
-	shippingFee, ok := ShippingFeeFor(input.ShippingMethod)
+	shippingFee, ok := r.shipping.Fee(input.ShippingMethod, 0)
 	if !ok {
 		// Defense in depth: handlers validate the shipping method before
 		// calling this, so reaching here means a validation gap upstream.
@@ -89,11 +92,14 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 		return Order{}, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT id FROM users WHERE id=$1 FOR UPDATE", userID); err != nil {
+		return Order{}, err
+	}
 
 	// Lock the product rows referenced by the cart so concurrent checkouts
 	// or stock updates can't race with this one.
 	rows, err := tx.Query(ctx, `
-		SELECT ci.product_id, p.name, p.slug, p.price, p.stock, ci.quantity
+		SELECT ci.product_id, p.name, p.slug, p.price, p.stock, ci.quantity, COALESCE(p.details->>'kind',''), COALESCE(NULLIF(p.details->>'expiry_date','')::date < CURRENT_DATE,false)
 		FROM cart_items ci
 		JOIN products p ON p.id = ci.product_id
 		WHERE ci.user_id = $1
@@ -106,7 +112,7 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 	lines := make([]cartLine, 0)
 	for rows.Next() {
 		var l cartLine
-		if err := rows.Scan(&l.ProductID, &l.ProductName, &l.ProductSlug, &l.Price, &l.Stock, &l.Quantity); err != nil {
+		if err := rows.Scan(&l.ProductID, &l.ProductName, &l.ProductSlug, &l.Price, &l.Stock, &l.Quantity, &l.Kind, &l.Expired); err != nil {
 			rows.Close()
 			return Order{}, err
 		}
@@ -122,11 +128,23 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 	}
 
 	for _, l := range lines {
-		if l.Quantity > l.Stock {
+		if l.Quantity > l.Stock || l.Expired {
 			return Order{}, ErrInsufficientStock
 		}
 	}
 
+	allDigital := true
+	for _, l := range lines {
+		if l.Kind != "education" {
+			allDigital = false
+		}
+	}
+	if input.ShippingMethod == "digital" && !allDigital {
+		return Order{}, &ErrValidation{Field: "shipping_method", Message: "digital delivery requires only education products"}
+	}
+	if allDigital {
+		input.ShippingMethod = "digital"
+	}
 	var itemsSubtotal int64
 	for _, l := range lines {
 		itemsSubtotal += l.Price * int64(l.Quantity)
@@ -161,6 +179,7 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 		couponCode = &code
 	}
 
+	shippingFee, _ = r.shipping.Fee(input.ShippingMethod, itemsSubtotal-discountAmount)
 	total := (itemsSubtotal - discountAmount) + shippingFee
 
 	var o Order
@@ -224,15 +243,13 @@ func (r *Repository) CreateFromCart(ctx context.Context, userID int64, input Che
 		return Order{}, err
 	}
 
+	if r.notifications != nil {
+		if err := r.notifications.OrderEventTx(ctx, tx, o.ID, "created"); err != nil {
+			return Order{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Order{}, err
-	}
-
-	// Enqueue order_created notification after successful order creation
-	// This is done outside the transaction to avoid blocking SMTP calls
-	// but after the transaction commits to ensure the order exists
-	if r.notifications != nil {
-		_ = r.EnqueueOrderCreated(ctx, o.ID)
 	}
 
 	return o, nil
@@ -252,7 +269,7 @@ func (r *Repository) EnqueueOrderCreated(ctx context.Context, orderID int64) err
 
 	// Get order items for the payload
 	rows, err := r.db.Query(ctx, `
-		SELECT product_id, product_name, product_slug, unit_price, quantity, subtotal
+		SELECT product_id, product_name, unit_price, quantity, subtotal
 		FROM order_items WHERE order_id = $1 ORDER BY id
 	`, orderID)
 	if err != nil {
@@ -601,14 +618,13 @@ func (r *Repository) UpdateStatus(ctx context.Context, orderID int64, newStatus 
 		return AdminOrderWithItems{}, err
 	}
 
+	if r.notifications != nil {
+		if err := r.notifications.OrderEventTx(ctx, tx, orderID, newStatus); err != nil {
+			return AdminOrderWithItems{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return AdminOrderWithItems{}, err
-	}
-
-	// Enqueue status transition notification after successful update
-	// (order_cancelled is handled separately in CancelOwnOrder/UpdateStatus)
-	if newStatus != StatusCancelled && r.notifications != nil {
-		_ = r.EnqueueOrderStatus(ctx, orderID, newStatus)
 	}
 
 	// Re-read the full record (with items/customer) outside the write
@@ -676,13 +692,13 @@ func (r *Repository) CancelOwnOrder(ctx context.Context, userID, orderID int64) 
 		return OrderWithItems{}, err
 	}
 
+	if r.notifications != nil {
+		if err := r.notifications.OrderEventTx(ctx, tx, orderID, "cancelled"); err != nil {
+			return OrderWithItems{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return OrderWithItems{}, err
-	}
-
-	// Enqueue order_cancelled notification after successful cancellation
-	if r.notifications != nil {
-		_ = r.EnqueueOrderCancelled(ctx, orderID)
 	}
 
 	return r.GetByIDForUser(ctx, userID, orderID)
@@ -698,7 +714,7 @@ func paymentBlocksCancellation(ctx context.Context, tx pgx.Tx, orderID int64, pa
 		SELECT EXISTS (
 			SELECT 1 FROM payment_attempts
 			WHERE order_id = $1
-			  AND (status IN ('pending', 'paid', 'reconciliation') OR authority IS NOT NULL)
+			  AND (status IN ('pending', 'paid', 'reconciliation') OR (authority IS NOT NULL AND status <> 'expired'))
 		)
 	`, orderID).Scan(&exists)
 	return exists, err

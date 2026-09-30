@@ -109,7 +109,7 @@ func (w *Worker) run(ctx context.Context) {
 
 func (w *Worker) processBatch(ctx context.Context) {
 	// Fetch pending notifications
-	notifications, err := w.repo.GetPendingDue(ctx)
+	notifications, err := w.repo.GetPendingDueLimit(ctx, 10)
 	if err != nil {
 		slog.Error("notification worker: failed to fetch pending notifications", "error", err)
 		return
@@ -131,19 +131,23 @@ func (w *Worker) processBatch(ctx context.Context) {
 }
 
 func (w *Worker) processOne(ctx context.Context, n *NotificationOutbox) {
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
 	// Build email message
 	message := w.buildMessage(n)
 
 	// Send email
 	err := w.sender.Send(ctx, message)
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer persistCancel()
 	if err != nil {
-		w.handleSendFailure(ctx, n, err)
+		w.handleSendFailure(persistCtx, n, err)
 		return
 	}
 
 	// Mark as sent
 	sentAt := time.Now()
-	if err := w.repo.MarkSent(ctx, n.ID, sentAt); err != nil {
+	if err := w.repo.MarkSent(persistCtx, n.ID, sentAt); err != nil {
 		slog.Error("notification worker: failed to mark notification as sent",
 			"id", n.ID, "event_key", n.EventKey, "error", err)
 	}
@@ -155,7 +159,7 @@ func (w *Worker) handleSendFailure(ctx context.Context, n *NotificationOutbox, e
 		"id", n.ID, "event_key", n.EventKey, "attempts", n.Attempts, "error", err)
 
 	// Check if we should mark as permanently failed
-	if n.Attempts >= w.maxRetry {
+	if n.Attempts+1 >= w.maxRetry {
 		if err := w.repo.MarkPermanentFailure(ctx, n.ID, lastError); err != nil {
 			slog.Error("notification worker: failed to mark notification as permanently failed",
 				"id", n.ID, "error", err)
@@ -196,6 +200,10 @@ func (w *Worker) buildMessage(n *NotificationOutbox) Message {
 	plain := "اعلان جدید"
 
 	switch n.EventType {
+	case "password_reset":
+		resetURL, _ := n.Payload["reset_url"].(string)
+		return Message{To: n.RecipientEmail, Subject: "بازیابی رمز عبور", HTML: `<p>برای انتخاب رمز جدید: <a href="` + template.HTMLEscapeString(resetURL) + `">بازیابی رمز</a></p><p>اعتبار لینک ۳۰ دقیقه است.</p>`, Plain: "انتخاب رمز جدید (اعتبار ۳۰ دقیقه): " + resetURL}
+
 	case EventTypeOrderCreated:
 		subject = "سفارش جدید ثبت شد - درخت‌فروشی"
 		html = orderCreatedHTML

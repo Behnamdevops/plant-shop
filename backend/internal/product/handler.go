@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Behnamdevops/plant-shop/backend/internal/auth"
 	"github.com/jackc/pgx/v5"
@@ -66,6 +68,10 @@ func (h *Handler) cleanupImageIfUnused(ctx context.Context, oldURL, newURL *stri
 	}
 	key, ok := h.images.KeyFromURL(*oldURL)
 	if !ok {
+		return
+	}
+	used, err := h.repository.ImageReferenced(ctx, *oldURL)
+	if err != nil || used {
 		return
 	}
 	if err := h.images.Delete(ctx, key); err != nil {
@@ -158,6 +164,13 @@ func parseListFilters(r *http.Request) (ListFilters, error) {
 		filters.PageSize = pageSize
 	}
 
+	filters.Kind = q.Get("kind")
+	filters.Brand = strings.TrimSpace(q.Get("brand"))
+	filters.Formulation = strings.TrimSpace(q.Get("formulation"))
+	filters.Guide = q.Get("guide")
+	if !validChoice(filters.Kind, "fertilizer", "substrate", "tool", "protection", "education", "bundle") || len(filters.Brand) > 160 || len(filters.Formulation) > 120 || len(filters.Guide) > 255 {
+		return filters, errors.New("invalid product filter")
+	}
 	return filters, nil
 }
 
@@ -202,6 +215,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateDetails(input.Details, input.ImageURLs); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	product, err := h.repository.Create(r.Context(), input)
 	if err != nil {
 		if errors.Is(err, ErrDuplicateSlug) {
@@ -299,6 +316,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if getErr == nil {
 		h.cleanupImageIfUnused(r.Context(), existing.ImageURL, nil)
+		for _, old := range existing.ImageURLs {
+			h.cleanupImageIfUnused(r.Context(), &old, nil)
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -385,10 +405,26 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	// delete a previous locally-managed image before the database write
 	// that replaces it is confirmed.
 	var previousImageURL *string
+	var previousGallery []string
 	if existing, getErr := h.repository.GetByID(r.Context(), id); getErr == nil {
 		previousImageURL = existing.ImageURL
+		previousGallery = existing.ImageURLs
 	}
 
+	if input.Details != nil {
+		if err := validateDetails(*input.Details, nil); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+	}
+	if input.ImageURLs != nil {
+		if err := validateDetails(Details{}, *input.ImageURLs); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+	}
+	adminID, _ := h.auth.RequireAdmin(r)
+	input.AdminUserID = &adminID
 	product, err := h.repository.Update(r.Context(), id, input)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -408,7 +444,78 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.cleanupImageIfUnused(r.Context(), previousImageURL, product.ImageURL)
+	for _, old := range previousGallery {
+		h.cleanupImageIfUnused(r.Context(), &old, nil)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(product)
+}
+
+func validChoice(value string, choices ...string) bool {
+	if value == "" {
+		return true
+	}
+	for _, c := range choices {
+		if c == value {
+			return true
+		}
+	}
+	return false
+}
+func validateDetails(c Details, images []string) error {
+	if !validChoice(c.Kind, "fertilizer", "substrate", "tool", "protection", "education", "bundle") || c.PackCount < 0 || c.PackCount > 10000 || len(images) > 8 || len(c.RelatedIDs) > 8 {
+		return errors.New("invalid product details or gallery")
+	}
+	for _, v := range []string{c.Brand, c.WeightVolume, c.Formulation, c.Country} {
+		if len(v) > 160 {
+			return errors.New("product attribute too long")
+		}
+	}
+	for _, v := range []string{c.SuitableFor, c.Composition, c.Usage, c.Benefits, c.Warnings, c.Included, c.DeliveryInfo} {
+		if len(v) > 6000 {
+			return errors.New("product text too long")
+		}
+	}
+	if len(c.ArticleSlug) > 255 {
+		return errors.New("guide slug too long")
+	}
+	if c.ExpiryDate != "" {
+		if _, err := time.Parse("2006-01-02", c.ExpiryDate); err != nil {
+			return errors.New("expiry_date must be YYYY-MM-DD")
+		}
+	}
+	seen := map[int64]bool{}
+	for _, id := range c.RelatedIDs {
+		if id <= 0 || seen[id] {
+			return errors.New("invalid related product IDs")
+		}
+		seen[id] = true
+	}
+	for _, image := range images {
+		u, err := url.Parse(image)
+		if err != nil || len(image) > 2048 || u.User != nil || !(strings.HasPrefix(image, "/uploads/") || (u.Scheme == "https" && u.Host != "")) {
+			return errors.New("invalid image URL")
+		}
+	}
+	return nil
+}
+
+func (h *Handler) Related(w http.ResponseWriter, r *http.Request) {
+	p, err := h.repository.GetBySlug(r.Context(), r.PathValue("slug"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "product not found", 404)
+		return
+	}
+	if err != nil {
+		http.Error(w, "unavailable", 500)
+		return
+	}
+	items, err := h.repository.Related(r.Context(), p)
+	if err != nil {
+		http.Error(w, "unavailable", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
 }

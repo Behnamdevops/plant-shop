@@ -1,36 +1,28 @@
-import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { storeConfig } from '../config'
-import SectionHeader from '../components/SectionHeader'
-import SEO from '../components/SEO'
+import { Link } from "react-router-dom";
+import { storeConfig } from "../config";
+import SectionHeader from "../components/SectionHeader";
+import SEO from "../components/SEO";
 
 type ContactConfig = {
-  supportEmail?: string
-  supportPhone?: string
-  supportTelegram?: string
-  supportInstagram?: string
-}
+  supportEmail?: string;
+  supportPhone?: string;
+  supportTelegram?: string;
+  supportInstagram?: string;
+};
 
 const contactConfig: ContactConfig = {
   supportEmail: import.meta.env.VITE_SUPPORT_EMAIL || undefined,
   supportPhone: import.meta.env.VITE_SUPPORT_PHONE || undefined,
   supportTelegram: import.meta.env.VITE_SUPPORT_TELEGRAM || undefined,
   supportInstagram: import.meta.env.VITE_SUPPORT_INSTAGRAM || undefined,
-}
+};
 
-const hasContactInfo = contactConfig.supportEmail || contactConfig.supportPhone
+const hasContactInfo = Object.values(contactConfig).some(Boolean);
 
 export default function ContactPage() {
-  const pageTitle = 'تماس با ما'
-  const pageDescription = 'ارتباط با ' + storeConfig.name + ' برای سوالات و پشتیبانی'
-
-  useEffect(() => {
-    document.title = `${pageTitle} - ${storeConfig.name}`
-    const descMeta = document.querySelector('meta[name="description"]')
-    if (descMeta) {
-      descMeta.setAttribute('content', pageDescription)
-    }
-  }, [])
+  const pageTitle = "تماس با ما";
+  const pageDescription =
+    "ارتباط با " + storeConfig.name + " برای سوالات و پشتیبانی";
 
   return (
     <div className="contact-page">
@@ -49,7 +41,7 @@ export default function ContactPage() {
         <div className="contact-intro">
           <p>
             در {storeConfig.name} همیشه آماده هستیم تا به سوالات شما پاسخ دهیم.
-            از انتخاب گیاه تا مشکلات نگهداری، ما در کنار شما هستیم.
+            از انتخاب محصول تا روش مصرف و خدمات آموزشی، ما در کنار شما هستیم.
           </p>
         </div>
 
@@ -118,8 +110,8 @@ export default function ContactPage() {
         ) : (
           <div className="contact-placeholder">
             <p>
-              برای تماس با ما از طریق فرم زیر اقدام کنید.
-              پشتیبانی ما در اسرع وقت به شما پاسخ خواهد داد.
+              راه‌های تماس هنوز توسط فروشگاه ثبت نشده‌اند. لطفاً بعداً دوباره
+              بررسی کنید.
             </p>
           </div>
         )}
@@ -132,64 +124,7 @@ export default function ContactPage() {
             <Link to="/returns">سیاست بازگرداندن</Link>
           </div>
         </div>
-
-        {hasContactInfo ? (
-          <div className="contact-form-note">
-            <p>
-              در حال حاضر فرم آنلاین در دسترس نیست. لطفاً از روش‌های ارتباطی بالا استفاده کنید.
-            </p>
-          </div>
-        ) : (
-          <div className="contact-form">
-            <form className="contact-form__fields">
-              <div className="form-group">
-                <label htmlFor="name">نام و نام خانوادگی</label>
-                <input
-                  type="text"
-                  id="name"
-                  className="form-input"
-                  placeholder="نام خود را وارد کنید"
-                  disabled
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="email">ایمیل</label>
-                <input
-                  type="email"
-                  id="email"
-                  className="form-input"
-                  placeholder="ایمیل خود را وارد کنید"
-                  disabled
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="message">پیام شما</label>
-                <textarea
-                  id="message"
-                  className="form-input form-textarea"
-                  placeholder="پیام خود را بنویسید"
-                  rows={5}
-                  disabled
-                />
-              </div>
-              <div className="form-note">
-                <p>
-                  این فرم در حال حاضر فعال نیست. لطفاً از روش‌های ارتباطی بالا استفاده کنید.
-                </p>
-              </div>
-            </form>
-          </div>
-        )}
-
-        <div className="contact-availability">
-          <h3>ساعات پشتیبانی</h3>
-          <ul className="availability-list">
-            <li>شنبه تا چهارشنبه: ۹:۰۰ تا ۱۸:۰۰</li>
-            <li>پنج‌شنبه: ۹:۰۰ تا ۱۴:۰۰</li>
-            <li>جمعه: تعطیل</li>
-          </ul>
-        </div>
       </div>
     </div>
-  )
+  );
 }

@@ -1,26 +1,40 @@
 import { useState } from 'react'
-
-type ProductImageProps = {
+import Icon from './Icon'
+type Props = {
   src: string | null
   alt: string
   className?: string
   placeholderClassName?: string
+  priority?: boolean
 }
-
-// ProductImage renders a product's image with a graceful fallback: shows
-// the leaf placeholder when there is no image_url at all, and falls back
-// to the same placeholder if the URL fails to load (e.g. a broken external
-// link, or a locally uploaded image that was removed).
-export default function ProductImage({ src, alt, className, placeholderClassName }: ProductImageProps) {
-  const [failed, setFailed] = useState(false)
-
-  if (!src || failed) {
+export default function ProductImage({
+  src,
+  alt,
+  className,
+  placeholderClassName,
+  priority = false,
+}: Props) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  if (!src || failedSrc === src)
     return (
-      <span className={placeholderClassName} aria-hidden="true">
-        🌱
+      <span
+        className={`${placeholderClassName || ''} image-placeholder`}
+        role="img"
+        aria-label={`${alt}؛ تصویر ثبت نشده`}
+      >
+        <Icon name="leaf" size={52} />
+        <small>تصویر محصول</small>
       </span>
     )
-  }
-
-  return <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
+      fetchPriority={priority ? 'high' : 'auto'}
+      onError={() => setFailedSrc(src)}
+    />
+  )
 }

@@ -140,6 +140,7 @@ const (
 
 var validShippingMethods = map[string]bool{
 	ShippingMethodStandard: true,
+	"digital":              true,
 	ShippingMethodExpress:  true,
 }
 
@@ -308,7 +309,7 @@ func (in CheckoutInput) Validate() error {
 		{"country", trimmed.Country, maxCountryLen},
 	}
 	for _, f := range required {
-		if f.value == "" {
+		if f.value == "" && !(trimmed.ShippingMethod == "digital" && f.field != "recipient_name" && f.field != "phone") {
 			return &ErrValidation{Field: f.field, Message: "is required"}
 		}
 		if len(f.value) > f.maxLen {

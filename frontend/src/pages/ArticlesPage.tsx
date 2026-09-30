@@ -1,88 +1,105 @@
-import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { getArticleCategories, getArticles, type Article, type ArticleCategory } from '../api/articles'
-import SEO from '../components/SEO'
-import { storeConfig } from '../config'
+import { usePublicData } from "../context/PublicDataContext";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  getArticleCategories,
+  getArticles,
+  type Article,
+  type ArticleCategory,
+} from "../api/articles";
+import SEO from "../components/SEO";
 
 export default function ArticlesPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [articles, setArticles] = useState<Article[]>([])
-  const [categories, setCategories] = useState<ArticleCategory[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [totalPages, setTotalPages] = useState(0)
+  const bootstrap = usePublicData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [articles, setArticles] = useState<Article[]>(
+    bootstrap?.articles?.items || [],
+  );
+  const [categories, setCategories] = useState<ArticleCategory[]>(
+    bootstrap?.articleCategories || [],
+  );
+  const [loading, setLoading] = useState(!bootstrap);
+  const [error, setError] = useState<string | null>(null);
+  const [totalPages, setTotalPages] = useState(
+    bootstrap?.products?.total_pages || bootstrap?.articles?.total_pages || 0,
+  );
 
-  const q = searchParams.get('q') || ''
-  const category = searchParams.get('category')
-  const page = parseInt(searchParams.get('page') || '1', 10)
+  const q = searchParams.get("q") || "";
+  const category = searchParams.get("category");
+  const page = parseInt(searchParams.get("page") || "1", 10);
 
   useEffect(() => {
+    let active = true;
     Promise.all([
       getArticleCategories(),
-      getArticles({ q: q || undefined, category: category ? parseInt(category, 10) : undefined, page, page_size: 12 })
+      getArticles({
+        q: q || undefined,
+        category: category ? parseInt(category, 10) : undefined,
+        page,
+        page_size: 12,
+      }),
     ])
       .then(([cats, articlesData]) => {
-        setCategories(cats)
-        setArticles(articlesData.items)
-        setTotalPages(articlesData.total_pages)
-        setError(null)
+        if (!active) return;
+        setCategories(cats);
+        setArticles(articlesData.items);
+        setTotalPages(articlesData.total_pages);
+        setError(null);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'خطا در دریافت مقالات')
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "خطا در دریافت مقالات");
       })
-      .finally(() => setLoading(false))
-  }, [q, category, page])
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [q, category, page]);
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const newQ = formData.get('q') as string
-    const params = new URLSearchParams(searchParams)
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const newQ = formData.get("q") as string;
+    const params = new URLSearchParams(searchParams);
     if (newQ) {
-      params.set('q', newQ)
+      params.set("q", newQ);
     } else {
-      params.delete('q')
+      params.delete("q");
     }
-    params.delete('page')
-    setSearchParams(params)
-  }
+    params.delete("page");
+    setSearchParams(params);
+  };
 
   const handleCategoryClick = (catId: number | null) => {
-    const params = new URLSearchParams(searchParams)
+    const params = new URLSearchParams(searchParams);
     if (catId) {
-      params.set('category', String(catId))
+      params.set("category", String(catId));
     } else {
-      params.delete('category')
+      params.delete("category");
     }
-    params.delete('page')
-    setSearchParams(params)
-  }
+    params.delete("page");
+    setSearchParams(params);
+  };
 
   const handlePageChange = (newPage: number) => {
-    const params = new URLSearchParams(searchParams)
-    params.set('page', String(newPage))
-    setSearchParams(params)
-  }
-
-  useEffect(() => {
-    document.title = 'مقالات و آموزش‌ها - ' + storeConfig.name
-    const descMeta = document.querySelector('meta[name="description"]')
-    if (descMeta) {
-      descMeta.setAttribute('content', 'مقالات و آموزش‌های جامع در مورد نگهداری گیاهان')
-    }
-  }, [])
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(newPage));
+    setSearchParams(params);
+  };
 
   const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return ''
-    return new Date(dateStr).toLocaleDateString('fa-IR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-  }
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("fa-IR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
 
   if (loading) {
-    return <div className="loading">در حال بارگذاری...</div>
+    return <div className="loading">در حال بارگذاری...</div>;
   }
 
   return (
@@ -90,12 +107,11 @@ export default function ArticlesPage() {
       <SEO
         title="مقالات و آموزش‌ها"
         description="مقالات و آموزش‌های جامع در مورد نگهداری گیاهان"
-        canonical="/articles"
+        canonical="/blog"
       />
       <div className="articles-header">
         <h1>مقالات و آموزش‌ها</h1>
-        <h1>مقالات و آموزش‌ها</h1>
-        
+
         <form onSubmit={handleSearch} className="search-form">
           <input
             type="text"
@@ -104,13 +120,15 @@ export default function ArticlesPage() {
             defaultValue={q}
             className="search-input"
           />
-          <button type="submit" className="search-btn">جستجو</button>
+          <button type="submit" className="search-btn">
+            جستجو
+          </button>
         </form>
       </div>
 
       <div className="articles-filters">
         <button
-          className={`filter-btn ${!category ? 'active' : ''}`}
+          className={`filter-btn ${!category ? "active" : ""}`}
           onClick={() => handleCategoryClick(null)}
         >
           همه
@@ -118,7 +136,7 @@ export default function ArticlesPage() {
         {categories.map((cat) => (
           <button
             key={cat.id}
-            className={`filter-btn ${category === String(cat.id) ? 'active' : ''}`}
+            className={`filter-btn ${category === String(cat.id) ? "active" : ""}`}
             onClick={() => handleCategoryClick(cat.id)}
           >
             {cat.name}
@@ -136,7 +154,11 @@ export default function ArticlesPage() {
         <>
           <div className="articles-grid">
             {articles.map((article) => (
-              <Link to={`/articles/${article.slug}`} key={article.id} className="article-card">
+              <Link
+                to={`/blog/${article.slug}`}
+                key={article.id}
+                className="article-card"
+              >
                 {article.cover_image_url && (
                   <div className="article-cover">
                     <img src={article.cover_image_url} alt={article.title} />
@@ -144,7 +166,9 @@ export default function ArticlesPage() {
                 )}
                 <div className="article-content">
                   {article.category && (
-                    <span className="article-category">{article.category.name}</span>
+                    <span className="article-category">
+                      {article.category.name}
+                    </span>
                   )}
                   <h3>{article.title}</h3>
                   <p className="article-excerpt">{article.excerpt}</p>
@@ -180,5 +204,5 @@ export default function ArticlesPage() {
         </>
       )}
     </div>
-  )
+  );
 }

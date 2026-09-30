@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html/template"
+	"mime"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
@@ -63,29 +65,35 @@ func (s *SMTPSender) Send(ctx context.Context, message Message) error {
 	// Build the address
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 
-	// Connect to SMTP server
-	var c *smtp.Client
-	var err error
-	if s.useTLS {
-		tlsConfig := &tls.Config{
-			ServerName: s.host,
-			MinVersion: tls.VersionTLS12,
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial failed: %w", err)
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	rawConn := conn
+	stop := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stop()
+	tlsConfig := &tls.Config{ServerName: s.host, MinVersion: tls.VersionTLS12}
+	if s.useTLS && s.port == 465 {
+		secure := tls.Client(conn, tlsConfig)
+		if err = secure.HandshakeContext(ctx); err != nil {
+			return fmt.Errorf("smtp TLS failed: %w", err)
 		}
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
-		if err != nil {
-			return fmt.Errorf("tls dial failed: %w", err)
-		}
-		c, err = smtp.NewClient(conn, s.host)
-		if err != nil {
-			return fmt.Errorf("smtp client creation failed: %w", err)
-		}
-	} else {
-		c, err = smtp.Dial(addr)
-		if err != nil {
-			return fmt.Errorf("smtp dial failed: %w", err)
-		}
+		conn = secure
+	}
+	c, err := smtp.NewClient(conn, s.host)
+	if err != nil {
+		return fmt.Errorf("smtp greeting failed: %w", err)
 	}
 	defer c.Close()
+	if s.useTLS && s.port != 465 {
+		if err = c.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("smtp STARTTLS required: %w", err)
+		}
+	}
 
 	// Authenticate if needed
 	if auth != nil {
@@ -109,13 +117,12 @@ func (s *SMTPSender) Send(ctx context.Context, message Message) error {
 	if err != nil {
 		return fmt.Errorf("smtp data failed: %w", err)
 	}
-	defer w.Close()
 
 	// Build the email headers and body
 	buf := &bytes.Buffer{}
 	buf.WriteString(fmt.Sprintf("From: %s <%s>\n", s.fromName, s.from))
 	buf.WriteString(fmt.Sprintf("To: %s\n", message.To))
-	buf.WriteString(fmt.Sprintf("Subject: %s\n", message.Subject))
+	buf.WriteString(fmt.Sprintf("Subject: %s\n", mime.QEncoding.Encode("utf-8", message.Subject)))
 	buf.WriteString("MIME-Version: 1.0\n")
 	buf.WriteString("Content-Type: multipart/alternative; boundary=boundary\n")
 	buf.WriteString("\n")
@@ -133,7 +140,7 @@ func (s *SMTPSender) Send(ctx context.Context, message Message) error {
 		return fmt.Errorf("smtp data write failed: %w", err)
 	}
 
-	return nil
+	return w.Close()
 }
 
 // NoOpSender is a sender that does nothing (used when emails are disabled).

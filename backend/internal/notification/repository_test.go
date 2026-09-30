@@ -93,18 +93,22 @@ func TestGetPendingDue(t *testing.T) {
 	eventKey := "test-pending-" + time.Now().Format("20060102150405")
 	_, err = db.Exec(t.Context(), `
 		INSERT INTO notification_outbox (event_key, recipient_email, event_type, payload, status, next_attempt_at)
-		VALUES ($1, $2, $3, $4, 'pending', NOW() - INTERVAL '1 minute')
+		VALUES ($1, $2, $3, $4, 'pending', TIMESTAMPTZ '2000-01-01')
 	`, eventKey, "test@example.com", "order_created", Payload{"test": "data"})
 	if err != nil {
 		t.Fatalf("insert failed: %v", err)
 	}
 
+	t.Cleanup(func() { db.Exec(context.Background(), "DELETE FROM notification_outbox WHERE event_key=$1", eventKey) })
 	// Get pending due should return the notification
 	notifications, err := repo.GetPendingDue(t.Context())
 	if err != nil {
 		t.Fatalf("GetPendingDue failed: %v", err)
 	}
 
+	if len(notifications) > 10 {
+		t.Fatalf("unbounded claim: %d", len(notifications))
+	}
 	found := false
 	for _, n := range notifications {
 		if n.EventKey == eventKey {

@@ -37,7 +37,11 @@
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.05s ease, box-shadow 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.05s ease,
+    box-shadow 0.2s ease;
   text-decoration: none;
   line-height: 1.3;
   white-space: nowrap;
@@ -141,7 +145,9 @@
   letter-spacing: -0.3px;
   padding: 8px 12px;
   border-radius: var(--radius);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .site-header__brand:hover {
@@ -168,7 +174,9 @@
   border-radius: var(--radius);
   font-weight: 500;
   font-size: 0.95rem;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .site-header__nav a:hover {
@@ -237,7 +245,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
 .card:hover {
@@ -913,7 +923,9 @@ tbody tr:hover {
   border-radius: var(--radius);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .address-option:hover {
@@ -921,7 +933,7 @@ tbody tr:hover {
   background: var(--primary-bg);
 }
 
-.address-option input[type="radio"] {
+.address-option input[type='radio'] {
   margin-top: 4px;
 }
 
@@ -1285,7 +1297,9 @@ tbody tr:hover {
   color: #b8c2b3;
   text-decoration: none;
   font-size: 0.92rem;
-  transition: color 0.2s ease, padding-left 0.2s ease;
+  transition:
+    color 0.2s ease,
+    padding-left 0.2s ease;
   padding: 6px 0;
   border-radius: 4px;
   display: inline-block;
@@ -1340,7 +1354,11 @@ tbody tr:hover {
 /* ---------- Hero Section ---------- */
 
 .hero {
-  background: linear-gradient(135deg, var(--primary-bg) 0%, var(--surface) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--primary-bg) 0%,
+    var(--surface) 100%
+  );
   padding: 64px 24px 48px;
   position: relative;
   overflow: hidden;
@@ -1353,7 +1371,11 @@ tbody tr:hover {
   right: -10%;
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, rgba(58, 115, 74, 0.08) 0%, transparent 70%);
+  background: radial-gradient(
+    circle,
+    rgba(58, 115, 74, 0.08) 0%,
+    transparent 70%
+  );
   border-radius: 50%;
   pointer-events: none;
 }
@@ -1459,8 +1481,13 @@ tbody tr:hover {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-20px) rotate(10deg); }
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-20px) rotate(10deg);
+  }
 }
 
 @media (max-width: 768px) {
@@ -1543,7 +1570,9 @@ tbody tr:hover {
   margin-top: 16px;
   padding: 8px 16px;
   border-radius: var(--radius-sm);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .section-header__link:hover {
@@ -1708,7 +1737,11 @@ tbody tr:hover {
 .final-cta {
   text-align: center;
   padding: 64px 32px;
-  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--primary-dark) 0%,
+    var(--primary) 100%
+  );
   color: var(--primary-contrast);
   border-radius: var(--radius-lg);
   margin-top: 64px;
@@ -2221,7 +2254,9 @@ tbody tr:hover {
   border-radius: var(--radius);
   background: var(--surface);
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .catalog-filters__checkbox:hover {
@@ -2229,7 +2264,7 @@ tbody tr:hover {
   border-color: var(--primary);
 }
 
-.catalog-filters__checkbox input[type="checkbox"] {
+.catalog-filters__checkbox input[type='checkbox'] {
   width: 18px;
   height: 18px;
   accent-color: var(--primary);
@@ -2340,7 +2375,7 @@ tbody tr:hover {
   background: var(--primary-light);
 }
 
-.address-option input[type="radio"] {
+.address-option input[type='radio'] {
   margin-top: 4px;
   accent-color: var(--primary);
   flex-shrink: 0;
@@ -2439,7 +2474,11 @@ tbody tr:hover {
 }
 
 .account-welcome {
-  background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--primary-light) 0%,
+    var(--primary) 100%
+  );
   border-radius: var(--radius-lg);
   padding: 32px;
   margin-bottom: 32px;
@@ -2615,7 +2654,8 @@ tbody tr:hover {
   box-shadow: var(--shadow-sm);
 }
 
-.form-card h1, .form-card h2 {
+.form-card h1,
+.form-card h2 {
   text-align: center;
   margin-bottom: 24px;
 }
@@ -2634,7 +2674,8 @@ tbody tr:hover {
   margin-bottom: 6px;
 }
 
-.form-field input, .form-field select {
+.form-field input,
+.form-field select {
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2644,7 +2685,8 @@ tbody tr:hover {
   transition: all 0.2s ease;
 }
 
-.form-field input:focus-visible, .form-field select:focus-visible {
+.form-field input:focus-visible,
+.form-field select:focus-visible {
   border-color: var(--primary);
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
@@ -2738,7 +2780,8 @@ table {
   min-width: 520px;
 }
 
-th, td {
+th,
+td {
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   text-align: start;
@@ -2901,4 +2944,69 @@ tbody tr:hover {
 .checkout-form {
   margin: 0;
   max-width: none;
+} /* Storefront upgrades: placed after legacy rules so responsive behavior wins. */
+.skip-link {
+  position: absolute;
+  inset-inline-start: 1rem;
+  top: -100px;
+  z-index: 1000;
+  background: #fff;
+  padding: 0.75rem;
+  border-radius: 8px;
+}
+.skip-link:focus {
+  top: 0.5rem;
+}
+.care-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  margin-block: 1rem;
+}
+.care-filters label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.care-filters select {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  font: inherit;
+}
+.product-card__placeholder {
+  min-height: 180px;
+}
+.product-card__body h3 a {
+  color: var(--text-h);
+}
+.menu-toggle {
+  display: none;
+}
+@media (max-width: 760px) {
+  .menu-toggle {
+    display: inline-flex;
+  }
+  .site-header__nav {
+    display: none;
+  }
+  .site-header__nav.is-open {
+    display: flex;
+  }
+  .product-detail {
+    grid-template-columns: 1fr;
+  }
+  .care-filters label {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .care-filters select {
+    flex: 1;
+    max-width: 70%;
+  }
 }

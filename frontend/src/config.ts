@@ -4,12 +4,18 @@
 // strings. All values have sensible defaults so local development works
 // with no .env file at all.
 export const storeConfig = {
+  publicOrigin: (
+    import.meta.env.VITE_PUBLIC_BASE_URL ||
+    (typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:4173")
+  ).replace(/\/$/, ""),
   // Display name shown in the header, homepage, and document title.
-  name: import.meta.env.VITE_STORE_NAME?.trim() || 'گلفروشی',
+  name: import.meta.env.VITE_STORE_NAME?.trim() || "گیاکو",
 
   // Retained for backward compatibility with VITE_CURRENCY_SYMBOL, but no
   // longer used for price display: the Persian storefront always shows
   // prices in تومان via src/lib/format.ts (formatToman), never a
   // configurable symbol.
-  currencySymbol: import.meta.env.VITE_CURRENCY_SYMBOL?.trim() || '$',
-}
+  currencySymbol: import.meta.env.VITE_CURRENCY_SYMBOL?.trim() || "$",
+};

@@ -1,3 +1,11 @@
+import type { Product } from '../types/product'
+import {
+  addGuestItem,
+  getGuestCart,
+  updateGuestItem,
+  deleteGuestItem,
+  cartChanged,
+} from '../lib/guestCart'
 import type { Cart, CartItem } from '../types/cart'
 import { throwApiError } from './errors'
 
@@ -17,6 +25,8 @@ export async function getCart(): Promise<Cart> {
     credentials: 'include',
   })
 
+  if (response.status === 401) return getGuestCart()
+
   if (!response.ok) {
     return throwApiError(response)
   }
@@ -24,7 +34,11 @@ export async function getCart(): Promise<Cart> {
   return response.json()
 }
 
-export async function addCartItem(productId: number, quantity: number): Promise<AddedItem> {
+export async function addCartItem(
+  productId: number,
+  quantity: number,
+  product?: Product,
+): Promise<AddedItem> {
   const response = await fetch('/api/v1/cart/items', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -32,14 +46,23 @@ export async function addCartItem(productId: number, quantity: number): Promise<
     body: JSON.stringify({ product_id: productId, quantity }),
   })
 
+  if (response.status === 401 && product) return addGuestItem(product, quantity)
   if (!response.ok) {
     return throwApiError(response)
   }
 
+  cartChanged()
   return response.json()
 }
 
-export async function updateCartItem(itemId: number, quantity: number): Promise<CartItem> {
+export async function updateCartItem(
+  itemId: number,
+  quantity: number,
+): Promise<CartItem> {
+  if (itemId < 0) {
+    updateGuestItem(itemId, quantity)
+    return (await getGuestCart()).items.find((x) => x.id === itemId)!
+  }
   const response = await fetch(`/api/v1/cart/items/${itemId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -51,10 +74,15 @@ export async function updateCartItem(itemId: number, quantity: number): Promise<
     return throwApiError(response)
   }
 
+  cartChanged()
   return response.json()
 }
 
 export async function deleteCartItem(itemId: number): Promise<void> {
+  if (itemId < 0) {
+    deleteGuestItem(itemId)
+    return
+  }
   const response = await fetch(`/api/v1/cart/items/${itemId}`, {
     method: 'DELETE',
     credentials: 'include',
@@ -63,4 +91,5 @@ export async function deleteCartItem(itemId: number): Promise<void> {
   if (!response.ok && response.status !== 401) {
     return throwApiError(response)
   }
+  cartChanged()
 }

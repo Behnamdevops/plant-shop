@@ -9,11 +9,14 @@ const PRIVATE_ROUTES = [
   '/orders',
   '/payment/result',
   '/login',
-  '/register'
+  '/register',
+  '/wishlist',
+  '/forgot-password',
+  '/reset-password',
 ]
 
 function isPrivateRoute(pathname: string): boolean {
-  return PRIVATE_ROUTES.some(route => pathname.startsWith(route))
+  return PRIVATE_ROUTES.some((route) => pathname.startsWith(route))
 }
 
 export default function PrivatePageProtection() {
@@ -33,4 +36,3 @@ export default function PrivatePageProtection() {
 
   return null
 }
-
